@@ -1,0 +1,11 @@
+{
+  "asset_slug": "ippcp_emisiones_wfs_ciudad_geojson",
+  "name": "IPPCP emisiones WFS ciudad GeoJSON",
+  "description": "Servicio WFS operativo de emisiones agregadas a nivel ciudad para validación IPPCP",
+  "type": "HttpData",
+  "base_url": "https://idezar-sig.zaragoza.es/servicios/geoserver/medioambiente/wfs?service=WFS&version=2.0.0&request=GetFeature&typeNames=medioambiente:emisiones_agregados_ciudad&outputFormat=application/json&count=10",
+  "content_kind": "json",
+  "extension": "json",
+  "media_type": "application/json",
+  "keywords": ["ippcp", "zaragoza", "emisiones", "wfs", "geojson", "ciudad"]
+}

@@ -1,0 +1,11 @@
+{
+  "asset_slug": "ingesta_excel_empresa_demo",
+  "name": "Ingesta Excel empresa demo",
+  "description": "Excel de ingesta para pruebas IPPCP",
+  "type": "HttpData",
+  "base_url": "https://REPLACE_ME/ingesta_empresa_demo.xlsx",
+  "content_kind": "binary",
+  "extension": "xlsx",
+  "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "keywords": ["ippcp", "ingesta", "excel"]
+}

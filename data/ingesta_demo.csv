@@ -1,0 +1,3 @@
+empresa,sector,anio,co2_ton,no2_ton,observaciones
+empresa_demo,industrial,2026,123.45,6.78,prueba de ingesta
+empresa_demo,logistica,2026,45.10,2.30,segunda fila

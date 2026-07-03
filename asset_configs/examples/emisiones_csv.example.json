@@ -1,0 +1,11 @@
+{
+  "asset_slug": "emisiones_csv",
+  "name": "Emisiones CSV",
+  "description": "Dataset de emisiones en CSV publicado por HTTP",
+  "type": "HttpData",
+  "base_url": "https://REPLACE_ME/emisiones.csv",
+  "content_kind": "text",
+  "extension": "csv",
+  "media_type": "text/csv",
+  "keywords": ["ippcp", "emisiones", "csv"]
+}

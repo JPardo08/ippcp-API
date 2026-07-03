@@ -1,0 +1,11 @@
+{
+  "asset_slug": "emisiones_wfs_gml",
+  "name": "Emisiones WFS GML",
+  "description": "Servicio WFS de emisiones en GML/XML",
+  "type": "HttpData",
+  "base_url": "https://REPLACE_ME/geoserver/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=emisiones",
+  "content_kind": "text",
+  "extension": "gml",
+  "media_type": "application/gml+xml",
+  "keywords": ["ippcp", "emisiones", "wfs", "gml"]
+}

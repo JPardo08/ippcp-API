@@ -1,0 +1,68 @@
+# IPPCP evidence export configuration.
+# Current validated IPPCP runs:
+# - T1 ingesta / Excel-CSV: 1783070399
+# - T2 WFS ciudad: 1783070513
+# - T3 SPARQL format JSON: 1783070583
+#
+# Historical test3-era delivery suffixes kept here for traceability:
+# - T1: 1782294549
+# - T2: 1782299532
+# - T3: 1782299641
+
+defaults:
+  repo_root: .
+  evidence_dir: evidencias/runs
+  downloads_dir: downloads
+
+connector_aliases:
+  conn-erick-test3: conn-company-ippcp
+  conn-edgar-test3: conn-citycouncil-ippcp
+
+connector_semantics:
+  conn-erick-test3:
+    organization_role: company
+    public_alias: conn-company-ippcp
+  conn-edgar-test3:
+    organization_role: citycouncil
+    public_alias: conn-citycouncil-ippcp
+
+expected_workflow_roles:
+  ingesta:
+    provider_role: company
+    consumer_role: citycouncil
+  consumo:
+    provider_role: citycouncil
+    consumer_role: company
+
+tests:
+  T1:
+    suffix: "1783070399"
+    sheet_name: T1_ingesta_csv
+    workflow: ingesta
+    asset_type: InesDataStore
+    provider_connector: conn-erick-test3
+    consumer_connector: conn-edgar-test3
+    asset_config: asset_configs/real/ingesta/ingesta_bbdd_residencial_2021_csv.json
+    expected_phases: [phase0, phase1b, phase2, phase3b, phase4b]
+
+  # Current validated IPPCP WFS run. Historical suffix: 1782299532.
+  T2:
+    suffix: "1783070513"
+    sheet_name: T2_wfs
+    workflow: consumo
+    asset_type: HttpData
+    provider_connector: conn-edgar-test3
+    consumer_connector: conn-erick-test3
+    asset_config: asset_configs/real/consumo/wfs/emisiones_wfs_ciudad_geojson.json
+    expected_phases: [phase0, phase1, phase2, phase3, phase4]
+
+  # Current validated IPPCP SPARQL run. Historical suffix: 1782299641.
+  T3:
+    suffix: "1783070583"
+    sheet_name: T3_sparql
+    workflow: consumo
+    asset_type: HttpData
+    provider_connector: conn-edgar-test3
+    consumer_connector: conn-erick-test3
+    asset_config: asset_configs/real/consumo/sparql/emisiones_sparql_limit10_format_json.json
+    expected_phases: [phase0, phase1, phase2, phase3, phase4]

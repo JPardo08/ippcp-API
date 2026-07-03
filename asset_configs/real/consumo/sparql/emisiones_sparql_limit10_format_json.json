@@ -1,0 +1,11 @@
+{
+  "asset_slug": "ippcp_emisiones_sparql_limit10_format_json",
+  "name": "IPPCP emisiones SPARQL validación format JSON",
+  "description": "Endpoint SPARQL público de Zaragoza forzando formato JSON mediante parámetro de URL para compatibilidad con HttpData sin headers custom",
+  "type": "HttpData",
+  "base_url": "https://datos.zaragoza.es/sparql?query=SELECT+%2A+WHERE+%7B+%3Fs+%3Fp+%3Fo+%7D+LIMIT+10&format=application%2Fsparql-results%2Bjson",
+  "content_kind": "json",
+  "extension": "json",
+  "media_type": "application/sparql-results+json",
+  "keywords": ["ippcp", "zaragoza", "emisiones", "sparql", "json", "format"]
+}

@@ -1,0 +1,11 @@
+{
+  "asset_slug": "jsonplaceholder_todos",
+  "name": "JSONPlaceholder Todos",
+  "description": "Dataset demo JSONPlaceholder todos para pruebas end-to-end",
+  "type": "HttpData",
+  "base_url": "https://jsonplaceholder.typicode.com/todos",
+  "content_kind": "json",
+  "extension": "json",
+  "media_type": "application/json",
+  "keywords": ["taller", "demo", "dataspace", "json"]
+}

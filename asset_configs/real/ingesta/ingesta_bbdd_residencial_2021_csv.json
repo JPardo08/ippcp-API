@@ -1,0 +1,14 @@
+{
+  "storage_mode": "inesdatastore",
+  "asset_slug": "ippcp_ingesta_bbdd_residencial_2021_csv",
+  "name": "IPPCP ingesta BBDD residencial 2021 CSV",
+  "description": "Fichero real de ingesta residencial 2021 para validación de upload local a InesDataStore",
+  "type": "InesDataStore",
+  "local_file": "data/real/ingesta/BBDD_Residencial_2021.csv",
+  "store_folder": "ippcp-ingesta",
+  "upload_file_name": "BBDD_Residencial_2021.csv",
+  "content_kind": "text",
+  "extension": "csv",
+  "media_type": "text/csv",
+  "keywords": ["ippcp", "zaragoza", "ingesta", "residencial", "csv", "2021"]
+}

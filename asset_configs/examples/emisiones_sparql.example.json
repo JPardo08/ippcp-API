@@ -1,0 +1,11 @@
+{
+  "asset_slug": "emisiones_sparql",
+  "name": "Emisiones SPARQL",
+  "description": "Consulta SPARQL de emisiones publicada como asset HTTP",
+  "type": "HttpData",
+  "base_url": "https://REPLACE_ME/sparql?query=SELECT%20%2A%20WHERE%20%7B%20%3Fs%20%3Fp%20%3Fo%20%7D%20LIMIT%20100&format=application%2Fsparql-results%2Bjson",
+  "content_kind": "json",
+  "extension": "json",
+  "media_type": "application/sparql-results+json",
+  "keywords": ["ippcp", "emisiones", "sparql"]
+}

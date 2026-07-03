@@ -1,0 +1,14 @@
+{
+  "storage_mode": "inesdatastore",
+  "asset_slug": "ingesta_csv_empresa_demo",
+  "name": "Ingesta CSV empresa demo",
+  "description": "CSV local de ingesta para validar upload a InesDataStore",
+  "type": "InesDataStore",
+  "local_file": "data/ingesta_demo.csv",
+  "store_folder": "ippcp-ingesta",
+  "upload_file_name": "ingesta_demo.csv",
+  "content_kind": "text",
+  "extension": "csv",
+  "media_type": "text/csv",
+  "keywords": ["ippcp", "ingesta", "csv"]
+}

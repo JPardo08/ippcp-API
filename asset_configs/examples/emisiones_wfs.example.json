@@ -1,0 +1,11 @@
+{
+  "asset_slug": "emisiones_wfs",
+  "name": "Emisiones WFS",
+  "description": "Servicio WFS de emisiones publicado como asset HTTP",
+  "type": "HttpData",
+  "base_url": "https://REPLACE_ME/geoserver/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=emisiones&outputFormat=application/json",
+  "content_kind": "json",
+  "extension": "json",
+  "media_type": "application/json",
+  "keywords": ["ippcp", "emisiones", "wfs"]
+}
