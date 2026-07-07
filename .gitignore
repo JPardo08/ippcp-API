@@ -48,6 +48,12 @@ flujos/**/user_consumer.sh
 # Generated evidence delivery reports
 reports/
 
+# Documentation
+docs/*.pdf
+docs/repo_*.md
+docs/notion_*.md
+docs/audit_*.md
+
 # Python bytecode
 __pycache__/
 *.py[cod]
