@@ -10,8 +10,18 @@ No modifican `evidencias/runs/`, `downloads/` ni los scripts Bash de fase.
 
 ## Instalación
 
+Se recomienda Python 3.10 o superior para ejecutar las herramientas de entrega. Si usas Conda:
+
 ```bash
-pip install -r tools/requirements-evidence-export.txt
+conda create -n data_spaces_310 python=3.10 -y
+conda activate data_spaces_310
+python --version
+```
+
+Instala dependencias desde la raíz del repo:
+
+```bash
+python3 -m pip install -r tools/requirements-evidence-export.txt
 ```
 
 Dependencias principales:
@@ -67,19 +77,44 @@ Si un campo no existe en los JSON, se escribe `not_found`.
 Para evitar mezclar Excel/ZIP antiguos con nuevos runs T2/T3, generar cada entrega en una carpeta dedicada:
 
 ```bash
+export T1_SUFFIX=1783070399
+export T2_SUFFIX=1783070513
+export T3_SUFFIX=1783070583
+
 TS=$(date +%Y%m%d_%H%M%S)
 EXPORT_DIR="reports/exports/$TS"
+TESTS="T1=$T1_SUFFIX,T2=$T2_SUFFIX,T3=$T3_SUFFIX"
 
 python tools/export_evidence_to_excel.py \
   --config tools/evidence_export.tests.yaml \
+  --tests "$TESTS" \
   --sanitize-connectors \
   --redact-local-paths \
   --timestamp "$TS" \
   --export-dir "$EXPORT_DIR" \
   --verbose
+```
 
+Antes de crear el ZIP definitivo, revisa qué entraría en el paquete:
+
+```bash
 python tools/package_evidence_bundle.py \
   --config tools/evidence_export.tests.yaml \
+  --tests "$TESTS" \
+  --excel "$EXPORT_DIR/ippcp_evidence_summary_${TS}.xlsx" \
+  --sanitize-connectors \
+  --redact-local-paths \
+  --include-downloaded-assets \
+  --dry-run \
+  --verbose
+```
+
+Crear ZIP final usando el mismo `TS` y `EXPORT_DIR`:
+
+```bash
+python tools/package_evidence_bundle.py \
+  --config tools/evidence_export.tests.yaml \
+  --tests "$TESTS" \
   --excel "$EXPORT_DIR/ippcp_evidence_summary_${TS}.xlsx" \
   --sanitize-connectors \
   --redact-local-paths \
@@ -194,6 +229,8 @@ rm -rf "$TMP_AUDIT"
 
 unzip -t "$ZIP_PATH"
 ```
+
+Si `unzip` dice que no encuentra el ZIP, normalmente se recalculó `TS` después de generar la entrega. Reutiliza el timestamp real de la carpeta creada en `reports/exports/`.
 
 ## Bash en macOS
 

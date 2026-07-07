@@ -1,4 +1,4 @@
-# Flujo IPPCP De Ingesta
+# Flujo IPPCP de ingesta
 
 Este directorio contiene la configuración operativa actual del flujo de ingesta del dataspace `ippcp`.
 
@@ -50,6 +50,7 @@ Indicar siempre el flujo anidado para evitar caer en documentación histórica:
 export BASH_BIN=/usr/local/bin/bash
 export IPPCP_FLOW=ingesta
 export IPPCP_FLOW_DIR="$PWD/flujos/ippcp/ingesta"
+export IPPCP_DATASPACE_DIR="$PWD/flujos/ippcp"
 
 $BASH_BIN scripts/phase0_context_smoke.sh
 ```

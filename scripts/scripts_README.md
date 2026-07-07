@@ -82,6 +82,7 @@ Seleccionar ingesta IPPCP:
 ```bash
 export IPPCP_FLOW=ingesta
 export IPPCP_FLOW_DIR="$PWD/flujos/ippcp/ingesta"
+export IPPCP_DATASPACE_DIR="$PWD/flujos/ippcp"
 $BASH_BIN scripts/phase0_context_smoke.sh
 ```
 
@@ -90,10 +91,13 @@ Seleccionar consumo IPPCP:
 ```bash
 export IPPCP_FLOW=consumo
 export IPPCP_FLOW_DIR="$PWD/flujos/ippcp/consumo"
+export IPPCP_DATASPACE_DIR="$PWD/flujos/ippcp"
 $BASH_BIN scripts/phase0_context_smoke.sh
 ```
 
 No usar `flujos/test3/` salvo para reproducir pruebas históricas.
+
+Si `IPPCP_FLOW_DIR` no está definido, `lib_common.sh` usa `flujos/${IPPCP_FLOW}` como ruta por defecto. En el repo actual de IPPCP eso puede producir errores como `Missing flow export: .../flujos/ingesta/export_provider.sh`. Para operación IPPCP actual, define siempre `IPPCP_FLOW_DIR` como se muestra arriba.
 
 ### Dataspace (`IPPCP_DATASPACE_DIR`)
 
@@ -443,7 +447,7 @@ jq . "downloads/manifests/${ASSET_ID}/latest.manifest.json"
 - `PHASE4B_ALLOW_SKIP=1` restaura comportamiento skipped si faltan credenciales (solo escape hatch).
 - `DOWNLOAD_FORCE=1` y `ALLOW_EMPTY_DOWNLOAD=1` se comportan como en Fase 4.
 
-## Assets Reales IPPCP Validados
+## Assets reales IPPCP validados
 
 Configs en `asset_configs/real/consumo/` y `asset_configs/real/ingesta/`. Datos y curls de referencia en `data/real/` (ver `data/real/real_README.md` y `data/real/consumo/consumo_README.md`).
 

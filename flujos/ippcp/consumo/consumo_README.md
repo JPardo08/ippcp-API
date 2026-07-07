@@ -1,4 +1,4 @@
-# Flujo IPPCP De Consumo
+# Flujo IPPCP de consumo
 
 Este directorio contiene la configuración operativa actual del flujo de consumo del dataspace `ippcp`.
 
@@ -52,6 +52,7 @@ Para usar este flujo hay que indicar explícitamente:
 export BASH_BIN=/usr/local/bin/bash
 export IPPCP_FLOW=consumo
 export IPPCP_FLOW_DIR="$PWD/flujos/ippcp/consumo"
+export IPPCP_DATASPACE_DIR="$PWD/flujos/ippcp"
 
 $BASH_BIN scripts/phase0_context_smoke.sh
 ```

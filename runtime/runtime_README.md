@@ -38,4 +38,15 @@ source runtime/env/latest/phase3b_env.sh
 
 No guardar aquí credenciales manuales ni ficheros sensibles versionables.
 
-Las credenciales de conector viven en `flujos/<flujo>/user_provider.sh` y `user_consumer.sh` (ignorados por Git). Ver [`../README.md`](../README.md) y [`../scripts/scripts_README.md`](../scripts/scripts_README.md).
+Las credenciales de conector viven en rutas locales ignoradas por Git:
+
+```text
+flujos/ippcp/ingesta/user_provider.sh
+flujos/ippcp/ingesta/user_consumer.sh
+flujos/ippcp/consumo/user_provider.sh
+flujos/ippcp/consumo/user_consumer.sh
+```
+
+`runtime/env/latest/` siempre representa el último estado exportado por fase. Si ejecutas T1, T2 y T3 seguidos, no uses estos envs como única fuente para inspección histórica: fija explícitamente `SUFFIX` y `ASSET_ID` del run que quieres revisar.
+
+Ver [`../README.md`](../README.md) y [`../scripts/scripts_README.md`](../scripts/scripts_README.md).

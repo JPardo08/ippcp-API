@@ -1,10 +1,53 @@
-# Configuración Inicial
+# Configuración inicial
 
 Esta guía explica cómo preparar la configuración para operar el EdD de IPPCP por API. La configuración operativa actual está en `flujos/ippcp/`.
 
 `flujos/test3/` existe como histórico de pruebas. No lo uses para operar el dataspace IPPCP actual.
 
-## Estructura De Configuración
+## Requisitos de terminal y herramientas
+
+Comprueba herramientas básicas:
+
+```bash
+command -v curl
+command -v jq
+command -v python3
+```
+
+En macOS, comprueba Bash moderno:
+
+```bash
+/usr/local/bin/bash --version
+/opt/homebrew/bin/bash --version
+```
+
+En Linux o WSL:
+
+```bash
+bash --version
+which bash
+echo "$SHELL"
+```
+
+Define `BASH_BIN` con la ruta real de Bash:
+
+```bash
+export BASH_BIN=/opt/homebrew/bin/bash
+```
+
+O en Linux/WSL:
+
+```bash
+export BASH_BIN="$(command -v bash)"
+```
+
+Para el flujo B2 de ingesta, el cliente MinIO `mc` debe estar instalado. En macOS:
+
+```bash
+brew install minio/stable/mc
+```
+
+## Estructura de configuración
 
 La estructura real es anidada:
 
@@ -25,7 +68,7 @@ flujos/test3/
 
 La estructura plana antigua `flujos/ingesta` y `flujos/consumo` no es la estructura operativa actual.
 
-## Orden De Carga
+## Orden de carga
 
 Para entender una ejecución, piensa en este orden:
 
@@ -327,25 +370,32 @@ echo "PROVIDER_USERNAME=$PROVIDER_USERNAME"
 echo "PROVIDER_PASSWORD_LEN=${#PROVIDER_PASSWORD}"
 ```
 
-Cómo validar el usuario provider contra Keycloak:
+Cómo validar el usuario provider contra Keycloak sin imprimir el token completo:
 
 ```bash
-curl -sS -w '\nHTTP=%{http_code}\n' -X POST "$KEYCLOAK_URL/realms/$DS_NAME/protocol/openid-connect/token" \
+TOKEN_JSON=$(mktemp)
+HTTP_CODE=$(curl -sS -o "$TOKEN_JSON" -w '%{http_code}' -X POST "$KEYCLOAK_URL/realms/$DS_NAME/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   --data-urlencode "grant_type=password" \
   --data-urlencode "client_id=$KC_CLIENT" \
   --data-urlencode "username=$PROVIDER_USERNAME" \
   --data-urlencode "password=$PROVIDER_PASSWORD" \
-  --data-urlencode "scope=openid profile email"
+  --data-urlencode "scope=openid profile email")
+
+TOKEN_LEN=$(jq -r '.access_token // ""' "$TOKEN_JSON" | wc -c | tr -d ' ')
+echo "HTTP=$HTTP_CODE"
+echo "ACCESS_TOKEN_LEN=$TOKEN_LEN"
+rm -f "$TOKEN_JSON"
 ```
 
 Salida esperada:
 
 ```text
 HTTP=200
+ACCESS_TOKEN_LEN=<numero>
 ```
 
-El body debe contener `access_token`. No copies ese token a documentación ni chats.
+No copies el `access_token` a documentación ni chats.
 
 Errores típicos:
 
@@ -397,25 +447,32 @@ echo "CONSUMER_USERNAME=$CONSUMER_USERNAME"
 echo "CONSUMER_PASSWORD_LEN=${#CONSUMER_PASSWORD}"
 ```
 
-Cómo validar el usuario consumer contra Keycloak:
+Cómo validar el usuario consumer contra Keycloak sin imprimir el token completo:
 
 ```bash
-curl -sS -w '\nHTTP=%{http_code}\n' -X POST "$KEYCLOAK_URL/realms/$DS_NAME/protocol/openid-connect/token" \
+TOKEN_JSON=$(mktemp)
+HTTP_CODE=$(curl -sS -o "$TOKEN_JSON" -w '%{http_code}' -X POST "$KEYCLOAK_URL/realms/$DS_NAME/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   --data-urlencode "grant_type=password" \
   --data-urlencode "client_id=$KC_CLIENT" \
   --data-urlencode "username=$CONSUMER_USERNAME" \
   --data-urlencode "password=$CONSUMER_PASSWORD" \
-  --data-urlencode "scope=openid profile email"
+  --data-urlencode "scope=openid profile email")
+
+TOKEN_LEN=$(jq -r '.access_token // ""' "$TOKEN_JSON" | wc -c | tr -d ' ')
+echo "HTTP=$HTTP_CODE"
+echo "ACCESS_TOKEN_LEN=$TOKEN_LEN"
+rm -f "$TOKEN_JSON"
 ```
 
 Salida esperada:
 
 ```text
 HTTP=200
+ACCESS_TOKEN_LEN=<numero>
 ```
 
-El body debe contener `access_token`. No copies ese token a documentación ni chats.
+No copies el `access_token` a documentación ni chats.
 
 Errores típicos:
 
@@ -447,7 +504,7 @@ vocabulary
 
 No contiene secretos. Lo cargan los scripts automáticamente.
 
-## Selección Automática De Dataspace
+## Selección automática de dataspace
 
 Los scripts usan `IPPCP_FLOW_DIR` para inferir el dataspace:
 
@@ -474,3 +531,50 @@ export IPPCP_DATASPACE_FILE="$PWD/flujos/ippcp/export_dataspace.sh"
 ```
 
 En operación normal IPPCP basta con definir `IPPCP_FLOW_DIR`.
+
+## Configuración de red / DNS
+
+Antes de ejecutar `phase0`, comprueba que los hosts públicos de los conectores resuelven desde tu equipo:
+
+```bash
+nslookup conn-company-ippcp.ds.inesdata-project.eu
+nslookup conn-citycouncil-ippcp.ds.inesdata-project.eu
+curl -I https://conn-company-ippcp.ds.inesdata-project.eu
+curl -I https://conn-citycouncil-ippcp.ds.inesdata-project.eu
+```
+
+Si aparece:
+
+```text
+Could not resolve host
+```
+
+el problema no está en Keycloak ni en las credenciales, sino en DNS/red. Posibles causas:
+
+- DNS público todavía no creado;
+- red/VPN incorrecta;
+- ingress no publicado;
+- host del conector distinto al configurado.
+
+Si el equipo de infraestructura confirma la IP vigente, se puede resolver temporalmente con `/etc/hosts`:
+
+```bash
+sudo nano /etc/hosts
+```
+
+Formato esperado:
+
+```text
+<IP_EDD_IPPCP> conn-company-ippcp.ds.inesdata-project.eu
+<IP_EDD_IPPCP> conn-citycouncil-ippcp.ds.inesdata-project.eu
+```
+
+En macOS, después de editar `/etc/hosts`:
+
+```bash
+sudo dscacheutil -flushcache
+sudo killall -HUP mDNSResponder
+dscacheutil -q host -a name conn-company-ippcp.ds.inesdata-project.eu
+```
+
+No documentes IPs temporales si no han sido confirmadas como vigentes por infraestructura.

@@ -1,10 +1,10 @@
-# Ejecución De Flujos IPPCP
+# Ejecución de flujos IPPCP
 
 Esta guía explica cómo ejecutar los tres flujos validados del dataspace IPPCP actual. Está pensada para partir de cero.
 
 No uses `flujos/test3/` para estas ejecuciones. `flujos/test3/` es histórico de pruebas. La operación actual se hace con `flujos/ippcp/`.
 
-## Preparación Común
+## Preparación común
 
 Clona el repositorio compartible:
 
@@ -26,6 +26,13 @@ Si Bash está en otra ruta:
 
 ```bash
 /opt/homebrew/bin/bash --version
+```
+
+En Linux o WSL:
+
+```bash
+bash --version
+which bash
 ```
 
 Define la ruta de Bash:
@@ -80,7 +87,16 @@ Salida esperada:
 DS_NAME=ippcp
 ```
 
-## Flujo 1: Asset De Ingesta / Excel-CSV
+Comprueba DNS/red antes de lanzar fases:
+
+```bash
+nslookup conn-company-ippcp.ds.inesdata-project.eu
+nslookup conn-citycouncil-ippcp.ds.inesdata-project.eu
+```
+
+Si aparece `Could not resolve host` durante `phase0`, revisa DNS, VPN o `/etc/hosts` antes de seguir. `phase0_env.sh` solo se genera si `phase0` termina correctamente.
+
+## Flujo 1: asset de ingesta / Excel-CSV
 
 ### Objetivo
 
@@ -94,7 +110,7 @@ data/real/ingesta/BBDD_Residencial_2021.csv
 
 Ese fichero es local y no se versiona. Debe existir antes de lanzar el flujo.
 
-### Configuración Previa
+### Configuración previa
 
 Datasource y flujo:
 
@@ -132,7 +148,7 @@ Fases:
 phase0 -> phase1b -> phase2 -> phase3b -> phase4b
 ```
 
-### Comandos Completos
+### Comandos completos
 
 Empieza con una ejecución limpia:
 
@@ -143,6 +159,7 @@ unset SUFFIX ASSET_ID AGREEMENT_ID TRANSFER_ID EDR_URL CD_ID VOCAB_ID ACCESS_POL
 
 export IPPCP_FLOW=ingesta
 export IPPCP_FLOW_DIR="$PWD/flujos/ippcp/ingesta"
+export IPPCP_DATASPACE_DIR="$PWD/flujos/ippcp"
 
 $BASH_BIN scripts/phase0_context_smoke.sh
 ```
@@ -152,8 +169,7 @@ Si `phase0` termina con `Fase 0 OK`, publica el asset de ingesta:
 ```bash
 source runtime/env/latest/phase0_env.sh
 
-ASSET_UPLOAD_CONFIG=asset_configs/real/ingesta/ingesta_bbdd_residencial_2021_csv.json \
-$BASH_BIN scripts/phase1b_provider_upload_file.sh
+ASSET_UPLOAD_CONFIG=asset_configs/real/ingesta/ingesta_bbdd_residencial_2021_csv.json $BASH_BIN scripts/phase1b_provider_upload_file.sh
 ```
 
 Si `phase1b` termina con `Fase 1b OK`, negocia el contrato:
@@ -177,7 +193,7 @@ source runtime/env/latest/phase3b_env.sh
 $BASH_BIN scripts/phase4b_consumer_storage_fetch.sh
 ```
 
-### IDs Esperados
+### IDs esperados
 
 Durante la ejecución aparecerán valores como:
 
@@ -199,7 +215,7 @@ SUFFIX=1783070399
 ASSET_ID=ippcp_ingesta_bbdd_residencial_2021_csv-1783070399
 ```
 
-### Evidencias Generadas
+### Evidencias generadas
 
 Evidencias por fase:
 
@@ -228,7 +244,7 @@ downloads/assets/<ASSET_ID>/latest.csv
 downloads/manifests/<ASSET_ID>/latest.manifest.json
 ```
 
-### Comprobación Final
+### Comprobación final
 
 ```bash
 echo "T1 SUFFIX=$SUFFIX"
@@ -249,7 +265,7 @@ sha256=<hash>
 
 `consumer_transfer_state=STARTED` puede ser aceptable si `phase4b` termina OK y hay `bytes` y `sha256`.
 
-### Errores Frecuentes
+### Errores frecuentes
 
 - `No se pudo obtener JWT`: usuario con OTP, credenciales incorrectas o realm incorrecto.
 - `STORAGE_MODE debe ser inesdatastore`: se cargó un env antiguo o se usó `phase1` en vez de `phase1b`.
@@ -257,13 +273,13 @@ sha256=<hash>
 - `local_file no encontrado`: falta `data/real/ingesta/BBDD_Residencial_2021.csv`.
 - Error de `mc`: falta cliente MinIO o no se recibieron credenciales S3 válidas en `phase3b`.
 
-## Flujo 2: Asset HTTP WFS
+## Flujo 2: asset HTTP WFS
 
 ### Objetivo
 
 Publicar un recurso HTTP tipo WFS como asset `HttpData`, negociar el acceso desde el consumer y descargar el contenido mediante EDR.
 
-### Configuración Previa
+### Configuración previa
 
 Datasource y flujo:
 
@@ -307,7 +323,7 @@ Fases:
 phase0 -> phase1 -> phase2 -> phase3 -> phase4
 ```
 
-### Comandos Completos
+### Comandos completos
 
 Empieza con una ejecución limpia:
 
@@ -318,6 +334,7 @@ unset SUFFIX ASSET_ID AGREEMENT_ID TRANSFER_ID EDR_URL CD_ID VOCAB_ID ACCESS_POL
 
 export IPPCP_FLOW=consumo
 export IPPCP_FLOW_DIR="$PWD/flujos/ippcp/consumo"
+export IPPCP_DATASPACE_DIR="$PWD/flujos/ippcp"
 
 $BASH_BIN scripts/phase0_context_smoke.sh
 ```
@@ -327,8 +344,13 @@ Si `phase0` termina con `Fase 0 OK`, publica el asset WFS:
 ```bash
 source runtime/env/latest/phase0_env.sh
 
-ASSET_CONFIG=asset_configs/real/consumo/wfs/emisiones_wfs_ciudad_geojson.json \
-$BASH_BIN scripts/phase1_provider_publish.sh
+ASSET_CONFIG=asset_configs/real/consumo/wfs/emisiones_wfs_ciudad_geojson.json $BASH_BIN scripts/phase1_provider_publish.sh
+```
+
+Si el taller decide usar la variante WFS de juntas, sustituye el config por:
+
+```bash
+ASSET_CONFIG=asset_configs/real/consumo/wfs/emisiones_wfs_juntas_geojson.json $BASH_BIN scripts/phase1_provider_publish.sh
 ```
 
 Si `phase1` termina con `Fase 1 OK`, negocia el contrato:
@@ -352,7 +374,7 @@ source runtime/env/latest/phase3_env.sh
 $BASH_BIN scripts/phase4_save_download.sh
 ```
 
-### IDs Esperados
+### IDs esperados
 
 Durante la ejecución aparecerán valores como:
 
@@ -375,7 +397,7 @@ SUFFIX=1783070513
 ASSET_ID=ippcp_emisiones_wfs_ciudad_geojson-1783070513
 ```
 
-### Evidencias Generadas
+### Evidencias generadas
 
 Evidencias por fase:
 
@@ -404,7 +426,7 @@ downloads/assets/<ASSET_ID>/latest.json
 downloads/manifests/<ASSET_ID>/latest.manifest.json
 ```
 
-### Comprobación Final
+### Comprobación final
 
 ```bash
 echo "T2 SUFFIX=$SUFFIX"
@@ -424,7 +446,7 @@ sha256=<hash>
 
 `transfer_state=STARTED` puede ser aceptable si `phase3` consumió datos y `phase4` guardó descarga con `sha256`.
 
-### Errores Frecuentes
+### Errores frecuentes
 
 - `No se pudo obtener JWT`: usuario con OTP, credenciales incorrectas o realm incorrecto.
 - `ASSET_CONFIG no encontrado`: ruta incorrecta.
@@ -432,13 +454,13 @@ sha256=<hash>
 - `HTTP 403` en una variante de autorización: puede no bloquear si otra variante devuelve `HTTP 200` y `phase3` termina OK.
 - Descarga vacía: revisar endpoint WFS, permisos y accesibilidad desde el dataplane.
 
-## Flujo 3: Asset HTTP SPARQL
+## Flujo 3: asset HTTP SPARQL
 
 ### Objetivo
 
 Publicar un recurso HTTP tipo SPARQL como asset `HttpData`, negociar el acceso desde el consumer y descargar el resultado JSON mediante EDR.
 
-### Configuración Previa
+### Configuración previa
 
 Datasource y flujo:
 
@@ -482,7 +504,7 @@ Fases:
 phase0 -> phase1 -> phase2 -> phase3 -> phase4
 ```
 
-### Comandos Completos
+### Comandos completos
 
 Empieza con una ejecución limpia:
 
@@ -493,6 +515,7 @@ unset SUFFIX ASSET_ID AGREEMENT_ID TRANSFER_ID EDR_URL CD_ID VOCAB_ID ACCESS_POL
 
 export IPPCP_FLOW=consumo
 export IPPCP_FLOW_DIR="$PWD/flujos/ippcp/consumo"
+export IPPCP_DATASPACE_DIR="$PWD/flujos/ippcp"
 
 $BASH_BIN scripts/phase0_context_smoke.sh
 ```
@@ -502,8 +525,7 @@ Si `phase0` termina con `Fase 0 OK`, publica el asset SPARQL:
 ```bash
 source runtime/env/latest/phase0_env.sh
 
-ASSET_CONFIG=asset_configs/real/consumo/sparql/emisiones_sparql_limit10_format_json.json \
-$BASH_BIN scripts/phase1_provider_publish.sh
+ASSET_CONFIG=asset_configs/real/consumo/sparql/emisiones_sparql_limit10_format_json.json $BASH_BIN scripts/phase1_provider_publish.sh
 ```
 
 Si `phase1` termina con `Fase 1 OK`, negocia el contrato:
@@ -527,7 +549,7 @@ source runtime/env/latest/phase3_env.sh
 $BASH_BIN scripts/phase4_save_download.sh
 ```
 
-### IDs Esperados
+### IDs esperados
 
 Durante la ejecución aparecerán valores como:
 
@@ -550,7 +572,7 @@ SUFFIX=1783070583
 ASSET_ID=ippcp_emisiones_sparql_limit10_format_json-1783070583
 ```
 
-### Evidencias Generadas
+### Evidencias generadas
 
 Evidencias por fase:
 
@@ -579,7 +601,7 @@ downloads/assets/<ASSET_ID>/latest.json
 downloads/manifests/<ASSET_ID>/latest.manifest.json
 ```
 
-### Comprobación Final
+### Comprobación final
 
 ```bash
 echo "T3 SUFFIX=$SUFFIX"
@@ -599,7 +621,7 @@ sha256=<hash>
 
 `transfer_state=STARTED` puede ser aceptable si `phase3` consumió datos y `phase4` guardó descarga con `sha256`.
 
-### Errores Frecuentes
+### Errores frecuentes
 
 - `No se pudo obtener JWT`: usuario con OTP, credenciales incorrectas o realm incorrecto.
 - Respuesta HTML/XML en vez de JSON: usar la config operativa con `format=application/sparql-results+json`.
@@ -608,7 +630,7 @@ sha256=<hash>
 - `HTTP 403` en una variante de autorización: puede no bloquear si otra variante devuelve `HTTP 200` y `phase3` termina OK.
 - Descarga vacía: revisar consulta SPARQL, formato de respuesta y accesibilidad desde el dataplane.
 
-## Revisión De Resultados
+## Revisión de resultados
 
 Para cualquier flujo, revisa:
 

@@ -1,10 +1,113 @@
-# Problemas Frecuentes
+# Problemas frecuentes
 
 Esta guía ayuda a diagnosticar errores habituales al operar el EdD de IPPCP por API.
 
 La configuración operativa actual está en `flujos/ippcp/`. `flujos/test3/` es histórico de pruebas.
 
-## El Usuario API Tiene OTP Activado
+## El host del conector no resuelve
+
+### Síntoma
+
+`phase0_context_smoke.sh` obtiene JWT correctamente, pero falla el smoke:
+
+```text
+curl: (6) Could not resolve host: conn-company-ippcp.ds.inesdata-project.eu
+```
+
+Después aparece:
+
+```text
+source: no such file or directory: runtime/env/latest/phase0_env.sh
+```
+
+### Causa
+
+El token de Keycloak se obtuvo bien, pero el host público del conector no resuelve desde tu equipo. Como `phase0` falló antes de terminar, no se generó `runtime/env/latest/phase0_env.sh`.
+
+### Comprobación
+
+```bash
+nslookup conn-company-ippcp.ds.inesdata-project.eu
+nslookup conn-citycouncil-ippcp.ds.inesdata-project.eu
+curl -I https://conn-company-ippcp.ds.inesdata-project.eu
+curl -I https://conn-citycouncil-ippcp.ds.inesdata-project.eu
+```
+
+### Solución
+
+- Confirmar DNS público, VPN o red correcta.
+- Confirmar con infraestructura si hace falta una entrada temporal en `/etc/hosts`.
+- No seguir con Fase 1 hasta que `phase0` termine con `Fase 0 OK`.
+
+## `TOKEN` no está definido
+
+### Síntoma
+
+Al intentar decodificar un JWT:
+
+```text
+KeyError: 'TOKEN'
+```
+
+### Causa
+
+Se ejecutó `export TOKEN` sin asignarle ningún valor.
+
+### Solución
+
+No pegues tokens completos en la terminal ni documentación. Si necesitas validar claims, usa los ficheros seguros que genera Fase 0:
+
+```bash
+jq . evidencias/runs/<SUFFIX>/phase0/jwt_claims_provider.json
+jq . evidencias/runs/<SUFFIX>/phase0/jwt_claims_consumer.json
+```
+
+Si estás haciendo una prueba manual, asigna `TOKEN` solo en tu terminal local y no lo copies a documentación.
+
+## `zsh: no such file or directory` con URLs entre `< >`
+
+### Síntoma
+
+```text
+zsh: no such file or directory: https://...
+```
+
+### Causa
+
+En `zsh`, escribir una URL como `<https://...>` se interpreta como redirección de entrada, no como texto.
+
+### Solución
+
+No uses `< >` alrededor de URLs reales en comandos:
+
+```bash
+curl -sk -i -X POST "https://conn-company-ippcp.ds.inesdata-project.eu/management/v3/assets/request" \
+  -H "Content-Type: application/json" \
+  --data '{"@context":{"@vocab":"https://w3id.org/edc/v0.0.1/ns/"},"offset":0,"limit":1,"filterExpression":[]}'
+```
+
+## Comentarios inline en `zsh`
+
+### Síntoma
+
+```text
+cp: conn-company-ippcp: Not a directory
+```
+
+### Causa
+
+El comentario inline después de `#` no se interpretó como comentario en esa shell interactiva.
+
+### Solución
+
+Ejecuta el comando sin comentario al final:
+
+```bash
+cp flujos/ippcp/ingesta/user_provider.example.sh flujos/ippcp/ingesta/user_provider.sh
+cp flujos/ippcp/ingesta/user_consumer.example.sh flujos/ippcp/ingesta/user_consumer.sh
+```
+
+## El usuario API tiene OTP activado
 
 ### Síntoma
 
@@ -40,7 +143,7 @@ Usa usuarios técnicos sin OTP:
 
 No uses usuarios personales de UI para automatización.
 
-## URL De Dataspace Incorrecta
+## URL de dataspace incorrecta
 
 ### Síntoma
 
@@ -92,7 +195,7 @@ Para consumo IPPCP debe apuntar a:
 flujos/ippcp/consumo
 ```
 
-## Provider Mal Configurado
+## Provider mal configurado
 
 ### Síntomas
 
@@ -134,7 +237,7 @@ echo "PROVIDER_PROTOCOL=$PROVIDER_PROTOCOL"
 - Ejecuta `phase0_context_smoke.sh` antes de publicar assets.
 - Revisa el body `.json` y el status `.http` en `evidencias/runs/<SUFFIX>/phase1/` o `phase1b/`.
 
-## Consumer Mal Configurado
+## Consumer mal configurado
 
 ### Síntomas
 
@@ -174,7 +277,7 @@ echo "CONSUMER_PROTOCOL=$CONSUMER_PROTOCOL"
 - Verifica que estás cargando `flujos/ippcp/ingesta` para ingesta y `flujos/ippcp/consumo` para WFS/SPARQL.
 - Revisa `evidencias/runs/<SUFFIX>/phase2/`.
 
-## Token Caducado O Inválido
+## Token caducado o inválido
 
 ### Síntoma
 
@@ -207,7 +310,7 @@ curl -sS -w '\nHTTP=%{http_code}\n' -X POST "$KEYCLOAK_URL/realms/$DS_NAME/proto
 
 No pegues tokens completos en documentación ni chats.
 
-## Error Al Crear Asset
+## Error al crear asset
 
 ### Síntomas
 
@@ -217,7 +320,7 @@ No pegues tokens completos en documentación ni chats.
 - `ASSET_UPLOAD_CONFIG` inválido;
 - `HTTP 400`, `401`, `403`, `404` o `409`.
 
-### Causas Posibles
+### Causas posibles
 
 - payload incompatible;
 - endpoint Management API incorrecto;
@@ -245,7 +348,7 @@ find "evidencias/runs/$SUFFIX/phase1" -maxdepth 1 -type f
 find "evidencias/runs/$SUFFIX/phase1b" -maxdepth 1 -type f
 ```
 
-## Error En Contract Definition
+## Error en contract definition
 
 ### Síntomas
 
@@ -253,7 +356,7 @@ find "evidencias/runs/$SUFFIX/phase1b" -maxdepth 1 -type f
 - `CD_ID` vacío;
 - `phase1` o `phase1b` falla al final.
 
-### Causas Posibles
+### Causas posibles
 
 - `ASSET_ID` incorrecto;
 - `CONTRACT_POLICY_ID` incorrecto;
@@ -277,7 +380,7 @@ Revisa `summary.json`:
 jq . "evidencias/runs/$SUFFIX/summary.json"
 ```
 
-## Error En Negotiation, Agreement O Transfer
+## Error en negotiation, agreement o transfer
 
 ### Síntomas
 
@@ -288,7 +391,7 @@ jq . "evidencias/runs/$SUFFIX/summary.json"
 - `phase4_save_download.sh` no encuentra datos;
 - `phase4b_consumer_storage_fetch.sh` no puede descargar desde MinIO.
 
-### Causas Posibles
+### Causas posibles
 
 - provider y consumer cruzados;
 - `contractDefinitionId` incorrecto;
@@ -329,7 +432,7 @@ find "evidencias/runs/$SUFFIX/phase3" -maxdepth 1 -type f
 find "evidencias/runs/$SUFFIX/phase3b" -maxdepth 1 -type f
 ```
 
-## Estructura Plana Antigua
+## Estructura plana antigua
 
 ### Síntoma
 

@@ -1,4 +1,4 @@
-# IPPCP API Automation
+# IPPCP API automation
 
 Este repositorio contiene scripts y documentación para operar por API el espacio de datos / EdD de IPPCP sobre conectores INESData. La finalidad es poder ejecutar las operaciones principales sin depender de la interfaz gráfica.
 
@@ -11,7 +11,7 @@ cd ippcp-API
 
 La documentación operativa principal se centra en el dataspace actual validado `ippcp`, configurado en `flujos/ippcp/`. El dataspace `test3`, configurado en `flujos/test3/`, queda como histórico de pruebas y no debe confundirse con la operación actual de IPPCP.
 
-## Qué Automatiza
+## Qué automatiza
 
 Los scripts permiten ejecutar de forma reproducible:
 
@@ -29,7 +29,7 @@ Los scripts permiten ejecutar de forma reproducible:
 - generación de evidencias;
 - generación de `summary.json`.
 
-## Estado Actual
+## Estado actual
 
 El EdD específico de IPPCP ya está levantado. El dataspace `ippcp` ha sido corregido, probado y validado mediante automatización API.
 
@@ -49,7 +49,7 @@ T3 HTTP SPARQL:         1783070583
 
 Estos runs generan evidencias locales bajo `evidencias/runs/<SUFFIX>/` y descargas verificadas bajo `downloads/`.
 
-## Requisitos Previos
+## Requisitos previos
 
 Antes de ejecutar los flujos hace falta:
 
@@ -84,13 +84,27 @@ Si tu Bash moderno está en Apple Silicon/Homebrew moderno:
 export BASH_BIN=/opt/homebrew/bin/bash
 ```
 
+En Linux o WSL suele bastar con:
+
+```bash
+bash --version
+which bash
+echo "$SHELL"
+```
+
+Si quieres fijarlo explícitamente:
+
+```bash
+export BASH_BIN="$(command -v bash)"
+```
+
 Para el flujo B2 de ingesta:
 
 ```bash
 brew install minio/stable/mc
 ```
 
-### Importante: Usuarios API Sin OTP
+### Importante: usuarios API sin OTP
 
 Los usuarios técnicos usados por los scripts API no deben tener OTP / MFA interactivo activado.
 
@@ -111,7 +125,7 @@ Recomendaciones:
 - no guardar contraseñas reales en documentación;
 - no subir `user_provider.sh`, `user_consumer.sh`, `.env`, tokens ni secretos a Git.
 
-## Estructura Real
+## Estructura real
 
 La estructura actual no es plana. El dataspace y los flujos están anidados:
 
@@ -180,7 +194,7 @@ ippcp-API/
 
 Nota histórica: documentación antigua puede mencionar `export_dataspace.sh` en la raíz o rutas planas como `flujos/ingesta` y `flujos/consumo`. Esa estructura era anterior. Para IPPCP actual se debe usar `flujos/ippcp/ingesta` y `flujos/ippcp/consumo`.
 
-## Configuración Inicial
+## Configuración inicial
 
 La configuración se carga en este orden conceptual:
 
@@ -198,6 +212,7 @@ Para ejecutar IPPCP se recomienda indicar siempre el flujo anidado:
 ```bash
 export IPPCP_FLOW=ingesta
 export IPPCP_FLOW_DIR="$PWD/flujos/ippcp/ingesta"
+export IPPCP_DATASPACE_DIR="$PWD/flujos/ippcp"
 ```
 
 Para consumo:
@@ -205,6 +220,7 @@ Para consumo:
 ```bash
 export IPPCP_FLOW=consumo
 export IPPCP_FLOW_DIR="$PWD/flujos/ippcp/consumo"
+export IPPCP_DATASPACE_DIR="$PWD/flujos/ippcp"
 ```
 
 Más detalle:
@@ -214,16 +230,16 @@ Más detalle:
 - [Evidencias](docs/evidencias.md)
 - [Problemas frecuentes](docs/troubleshooting.md)
 
-## Ejecución Paso A Paso
+## Ejecución paso a paso
 
-### 1. Clonar El Repositorio Compartible
+### 1. Clonar el repositorio compartible
 
 ```bash
 git clone https://github.com/JPardo08/ippcp-API.git
 cd ippcp-API
 ```
 
-### 2. Revisar Requisitos
+### 2. Revisar requisitos
 
 ```bash
 command -v curl
@@ -250,7 +266,7 @@ Si corresponde:
 export BASH_BIN=/opt/homebrew/bin/bash
 ```
 
-### 4. Preparar Credenciales Locales
+### 4. Preparar credenciales locales
 
 Para ingesta:
 
@@ -270,7 +286,20 @@ cp flujos/ippcp/consumo/user_consumer.example.sh flujos/ippcp/consumo/user_consu
 
 Edita `flujos/ippcp/consumo/user_provider.sh` y `flujos/ippcp/consumo/user_consumer.sh` localmente con usuarios técnicos sin OTP.
 
-### 5. Ejecutar Los Tres Flujos
+### 5. Comprobar DNS / red del EdD
+
+Antes de lanzar fases, verifica que los conectores resuelven desde tu equipo:
+
+```bash
+nslookup conn-company-ippcp.ds.inesdata-project.eu
+nslookup conn-citycouncil-ippcp.ds.inesdata-project.eu
+curl -I https://conn-company-ippcp.ds.inesdata-project.eu
+curl -I https://conn-citycouncil-ippcp.ds.inesdata-project.eu
+```
+
+Si el DNS público aún no resuelve, puede ser necesario añadir temporalmente entradas en `/etc/hosts` según indique el equipo de infraestructura. No hagas esta sustitución a ciegas: confirma primero la IP vigente del EdD IPPCP.
+
+### 6. Ejecutar los tres flujos
 
 Los comandos completos están en [Ejecución de flujos](docs/ejecucion_flujos.md).
 
@@ -280,9 +309,9 @@ Resumen:
 - HTTP WFS: `phase0 -> phase1 -> phase2 -> phase3 -> phase4`;
 - HTTP SPARQL: `phase0 -> phase1 -> phase2 -> phase3 -> phase4`.
 
-## Flujos Soportados
+## Flujos soportados
 
-### Flujo 1: Asset De Ingesta / Excel-CSV
+### Flujo 1: asset de ingesta / Excel-CSV
 
 Este flujo publica un fichero local como asset `InesDataStore`, negocia el contrato y verifica que el dato llega al storage del consumer.
 
@@ -297,7 +326,7 @@ Configuración operativa:
 
 Comandos completos: [Flujo 1 en docs/ejecucion_flujos.md](docs/ejecucion_flujos.md#flujo-1-asset-de-ingesta--excel-csv).
 
-### Flujo 2: Asset HTTP WFS
+### Flujo 2: asset HTTP WFS
 
 Este flujo publica un endpoint HTTP WFS como asset `HttpData`, negocia el contrato y descarga el contenido consumido por EDR.
 
@@ -311,7 +340,7 @@ Configuración operativa:
 
 Comandos completos: [Flujo 2 en docs/ejecucion_flujos.md](docs/ejecucion_flujos.md#flujo-2-asset-http-wfs).
 
-### Flujo 3: Asset HTTP SPARQL
+### Flujo 3: asset HTTP SPARQL
 
 Este flujo publica un endpoint HTTP SPARQL como asset `HttpData`, negocia el contrato y descarga el resultado JSON consumido por EDR.
 
@@ -325,7 +354,7 @@ Configuración operativa:
 
 Comandos completos: [Flujo 3 en docs/ejecucion_flujos.md](docs/ejecucion_flujos.md#flujo-3-asset-http-sparql).
 
-## Evidencias Generadas
+## Evidencias generadas
 
 Cada ejecución genera un identificador `SUFFIX`. En este repositorio no se usa el nombre `run_id` ni `correlation_id`; el identificador práctico es `SUFFIX`.
 
@@ -384,13 +413,12 @@ reports/
 
 Los scripts no deben guardar tokens completos en evidencias. Los JSON de claims solo incluyen metadatos seguros como `iat`, `exp`, `now` y `token_length`.
 
-## Documentación Complementaria
+## Documentación complementaria
 
 - [Configuración](docs/configuracion.md)
 - [Ejecución de flujos](docs/ejecucion_flujos.md)
 - [Evidencias](docs/evidencias.md)
 - [Problemas frecuentes](docs/troubleshooting.md)
-- [Sincronización Notion](docs/notion_sync.md)
 - [scripts/scripts_README.md](scripts/scripts_README.md)
 - [tools/tools_README.md](tools/tools_README.md)
 - [runtime/runtime_README.md](runtime/runtime_README.md)
