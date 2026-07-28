@@ -25,11 +25,20 @@ connector_semantics:
   conn-edgar-test3:
     organization_role: citycouncil
     public_alias: conn-citycouncil-ippcp
+  CONN-CITYCOUNCIL:
+    organization_role: citycouncil
+    public_alias: CONN-CITYCOUNCIL
+  CONN-COMPANY:
+    organization_role: company
+    public_alias: CONN-COMPANY
 
 expected_workflow_roles:
   ingesta:
     provider_role: company
     consumer_role: citycouncil
+  ingesta_api:
+    provider_role: citycouncil
+    consumer_role: company
   consumo:
     provider_role: citycouncil
     consumer_role: company
@@ -66,3 +75,16 @@ tests:
     consumer_connector: conn-erick-test3
     asset_config: asset_configs/real/consumo/sparql/emisiones_sparql_limit10_format_json.json
     expected_phases: [phase0, phase1, phase2, phase3, phase4]
+
+  # T4 is selected only when its suffix is supplied explicitly at runtime.
+  T4:
+    suffix: ""
+    sheet_name: T4_ingestion_api
+    workflow: ingesta_api
+    asset_type: HttpData-PULL
+    technical_provider_connector: CONN-CITYCOUNCIL
+    technical_consumer_connector: CONN-COMPANY
+    asset_config: asset_configs/real/ingesta/ingesta_api_pull_pre_api_key.json
+    expected_phases: [phase0, phase1, phase2, phase3, phase4]
+    publication_profile: minimal_publication
+    evidence_role: additional_validation

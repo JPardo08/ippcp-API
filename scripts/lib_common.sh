@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lib_common.sh — Librería compartida para automatización del taller API (test3).
+# lib_common.sh — Librería compartida para automatización API IPPCP.
 # No ejecuta llamadas al dataspace al sourcearse; los scripts de fase invocan
 # explícitamente las funciones que necesiten.
 
@@ -122,29 +122,46 @@ lib_require_vars_group() {
 
 lib_resolve_flow_dir() {
   IPPCP_FLOW="${IPPCP_FLOW:-ingesta}"
-  IPPCP_FLOW_DIR="${IPPCP_FLOW_DIR:-${API_ROOT}/flujos/${IPPCP_FLOW}}"
+
+  if [[ -z "${IPPCP_FLOW_DIR:-}" ]]; then
+    if [[ -n "${IPPCP_DATASPACE_DIR:-}" && -n "${IPPCP_FLOW_VERSION:-}" && -d "${IPPCP_DATASPACE_DIR}/${IPPCP_FLOW_VERSION}/${IPPCP_FLOW}" ]]; then
+      IPPCP_FLOW_DIR="${IPPCP_DATASPACE_DIR}/${IPPCP_FLOW_VERSION}/${IPPCP_FLOW}"
+    elif [[ -n "${IPPCP_DATASPACE_DIR:-}" && -d "${IPPCP_DATASPACE_DIR}/${IPPCP_FLOW}" ]]; then
+      IPPCP_FLOW_DIR="${IPPCP_DATASPACE_DIR}/${IPPCP_FLOW}"
+    else
+      IPPCP_FLOW_DIR="${API_ROOT}/flujos/${IPPCP_FLOW}"
+    fi
+  fi
+
   export IPPCP_FLOW IPPCP_FLOW_DIR
 }
 
 lib_resolve_dataspace_file() {
-  lib_resolve_flow_dir
+  local inferred_dataspace_dir inferred_dataspace_parent dataspace_file
 
-  local inferred_dataspace_dir dataspace_file
-  inferred_dataspace_dir="$(dirname "${IPPCP_FLOW_DIR}")"
+  if [[ -n "${IPPCP_FLOW_DIR:-}" ]]; then
+    inferred_dataspace_dir="$(dirname "${IPPCP_FLOW_DIR}")"
+    inferred_dataspace_parent="$(dirname "${inferred_dataspace_dir}")"
+  else
+    inferred_dataspace_dir=""
+    inferred_dataspace_parent=""
+  fi
 
   if [[ -n "${IPPCP_DATASPACE_FILE:-}" ]]; then
     dataspace_file="${IPPCP_DATASPACE_FILE}"
   elif [[ -n "${IPPCP_DATASPACE_DIR:-}" ]]; then
     dataspace_file="${IPPCP_DATASPACE_DIR}/export_dataspace.sh"
-  elif [[ -f "${inferred_dataspace_dir}/export_dataspace.sh" ]]; then
-    dataspace_file="${inferred_dataspace_dir}/export_dataspace.sh"
-    IPPCP_DATASPACE_DIR="${inferred_dataspace_dir}"
   elif [[ -n "${IPPCP_DATASPACE:-}" ]]; then
     dataspace_file="${API_ROOT}/flujos/${IPPCP_DATASPACE}/export_dataspace.sh"
     IPPCP_DATASPACE_DIR="${API_ROOT}/flujos/${IPPCP_DATASPACE}"
+  elif [[ -n "${inferred_dataspace_dir}" && -f "${inferred_dataspace_dir}/export_dataspace.sh" ]]; then
+    dataspace_file="${inferred_dataspace_dir}/export_dataspace.sh"
+    IPPCP_DATASPACE_DIR="${inferred_dataspace_dir}"
+  elif [[ -n "${inferred_dataspace_parent}" && -f "${inferred_dataspace_parent}/export_dataspace.sh" ]]; then
+    dataspace_file="${inferred_dataspace_parent}/export_dataspace.sh"
+    IPPCP_DATASPACE_DIR="${inferred_dataspace_parent}"
   else
-    dataspace_file="${API_ROOT}/flujos/test3/export_dataspace.sh"
-    IPPCP_DATASPACE_DIR="${API_ROOT}/flujos/test3"
+    lib_die "Unable to resolve dataspace. Set IPPCP_DATASPACE=ippcp (recommended) or define IPPCP_DATASPACE_DIR/IPPCP_DATASPACE_FILE explicitly."
   fi
 
   [[ -f "${dataspace_file}" ]] || lib_die "Missing dataspace export: ${dataspace_file}"
@@ -755,12 +772,16 @@ lib_export_phase_env() {
 
   case "${phase}" in
     0)
-      vars=(SUFFIX DS_NAME PROVIDER CONSUMER PROVIDER_BASE CONSUMER_BASE PROVIDER_PROTOCOL CONSUMER_PROTOCOL)
+      vars=(
+        SUFFIX DS_NAME PROVIDER CONSUMER PROVIDER_BASE CONSUMER_BASE PROVIDER_PROTOCOL CONSUMER_PROTOCOL
+        IPPCP_DATASPACE IPPCP_DATASPACE_DIR IPPCP_DATASPACE_FILE IPPCP_FLOW IPPCP_FLOW_VERSION IPPCP_FLOW_DIR
+      )
       ;;
     1)
       lib_derive_phase1_ids
       vars=(
         SUFFIX VOCAB_ID ACCESS_POLICY_ID CONTRACT_POLICY_ID ASSET_ID CD_ID
+        IPPCP_DATASPACE IPPCP_DATASPACE_DIR IPPCP_DATASPACE_FILE IPPCP_FLOW IPPCP_FLOW_VERSION IPPCP_FLOW_DIR
         ASSET_ID_CUSTOM ASSET_CONFIG ASSET_SLUG ASSET_NAME ASSET_DESCRIPTION
         ASSET_BASE_URL ASSET_CONTENT_KIND ASSET_EXTENSION ASSET_MEDIA_TYPE
         ASSET_KEYWORDS_JSON ASSET_DATA_ADDRESS_NAME STORAGE_MODE
@@ -770,6 +791,7 @@ lib_export_phase_env() {
       lib_derive_phase1_ids
       vars=(
         SUFFIX VOCAB_ID ACCESS_POLICY_ID CONTRACT_POLICY_ID ASSET_ID CD_ID
+        IPPCP_DATASPACE IPPCP_DATASPACE_DIR IPPCP_DATASPACE_FILE IPPCP_FLOW IPPCP_FLOW_VERSION IPPCP_FLOW_DIR
         ASSET_ID_CUSTOM ASSET_UPLOAD_CONFIG ASSET_SLUG ASSET_NAME ASSET_DESCRIPTION
         ASSET_CONTENT_KIND ASSET_EXTENSION ASSET_MEDIA_TYPE ASSET_KEYWORDS_JSON
         STORAGE_MODE LOCAL_FILE STORE_FOLDER UPLOAD_FILE_NAME FINALIZE_FILE_NAME
@@ -778,6 +800,7 @@ lib_export_phase_env() {
     2)
       vars=(
         SUFFIX ASSET_ID PROVIDER_PARTICIPANT_ID OFFER_POLICY_ID CATALOG_ASSET_ID NEG_ID AGREEMENT_ID
+        IPPCP_DATASPACE IPPCP_DATASPACE_DIR IPPCP_DATASPACE_FILE IPPCP_FLOW IPPCP_FLOW_VERSION IPPCP_FLOW_DIR
         ASSET_ID_CUSTOM ASSET_CONFIG ASSET_SLUG ASSET_NAME ASSET_DESCRIPTION
         ASSET_BASE_URL ASSET_CONTENT_KIND ASSET_EXTENSION ASSET_MEDIA_TYPE
         ASSET_KEYWORDS_JSON ASSET_DATA_ADDRESS_NAME STORAGE_MODE
@@ -786,6 +809,7 @@ lib_export_phase_env() {
     3)
       vars=(
         SUFFIX ASSET_ID ACCESS_POLICY_ID CONTRACT_POLICY_ID CD_ID NEG_ID AGREEMENT_ID TRANSFER_ID EDR_URL
+        IPPCP_DATASPACE IPPCP_DATASPACE_DIR IPPCP_DATASPACE_FILE IPPCP_FLOW IPPCP_FLOW_VERSION IPPCP_FLOW_DIR
         ASSET_ID_CUSTOM ASSET_CONFIG ASSET_SLUG ASSET_NAME ASSET_DESCRIPTION
         ASSET_BASE_URL ASSET_CONTENT_KIND ASSET_EXTENSION ASSET_MEDIA_TYPE
         ASSET_KEYWORDS_JSON ASSET_DATA_ADDRESS_NAME STORAGE_MODE
@@ -794,6 +818,7 @@ lib_export_phase_env() {
     3b)
       vars=(
         SUFFIX ASSET_ID ACCESS_POLICY_ID CONTRACT_POLICY_ID CD_ID NEG_ID AGREEMENT_ID TRANSFER_ID
+        IPPCP_DATASPACE IPPCP_DATASPACE_DIR IPPCP_DATASPACE_FILE IPPCP_FLOW IPPCP_FLOW_VERSION IPPCP_FLOW_DIR
         TRANSFER_TYPE STORAGE_MODE ASSET_CONTENT_KIND ASSET_EXTENSION ASSET_MEDIA_TYPE
         ASSET_UPLOAD_CONFIG LOCAL_FILE STORE_FOLDER UPLOAD_FILE_NAME FINALIZE_FILE_NAME
         CONSUMER_TRANSFER_STATE

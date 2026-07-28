@@ -1,0 +1,74 @@
+[
+  {
+    "test_id": "T4",
+    "suffix": "<run-id>",
+    "source_path": "",
+    "zip_path": "ippcp_evidence_package/T4_ingestion_api/sanitized_manifest.json",
+    "category": "publication_metadata",
+    "size_bytes": 302,
+    "sha256": "7f07fcb6ca657a6135c8e77e9934e4b0a7412b1c70c2306c72deae52527af3b8",
+    "sanitized": true,
+    "included": true,
+    "exclusion_reason": ""
+  },
+  {
+    "test_id": "T4",
+    "suffix": "<run-id>",
+    "source_path": "",
+    "zip_path": "ippcp_evidence_package/T4_ingestion_api/sanitized_summary.json",
+    "category": "publication_metadata",
+    "size_bytes": 816,
+    "sha256": "f271723411ae7cc86df0b559a9e710e86eb6309e181d6b26d6f8885db3933822",
+    "sanitized": true,
+    "included": true,
+    "exclusion_reason": ""
+  },
+  {
+    "test_id": "T4",
+    "suffix": "<run-id>",
+    "source_path": "",
+    "zip_path": "ippcp_evidence_package/T4_ingestion_api/validation_status.json",
+    "category": "publication_metadata",
+    "size_bytes": 335,
+    "sha256": "700be12f29c29fb9d62461c55cc4f97877b0b09625702dc55580ff2c2695b6a8",
+    "sanitized": true,
+    "included": true,
+    "exclusion_reason": ""
+  },
+  {
+    "test_id": "_package",
+    "suffix": "",
+    "source_path": "",
+    "zip_path": "ippcp_evidence_package/README_PACKAGE.txt",
+    "category": "readme",
+    "size_bytes": 977,
+    "sha256": "534a6037db48b7c5e6f1797512aedf07a8c7efc332ae7d698095e87d55af4d0b",
+    "sanitized": false,
+    "included": true,
+    "exclusion_reason": ""
+  },
+  {
+    "test_id": "_package",
+    "suffix": "",
+    "source_path": "",
+    "zip_path": "ippcp_evidence_package/package_manifest.json",
+    "category": "package_meta",
+    "size_bytes": "",
+    "sha256": "",
+    "sanitized": false,
+    "included": true,
+    "exclusion_reason": "self-referential"
+  },
+  {
+    "test_id": "_package",
+    "suffix": "",
+    "source_path": "",
+    "zip_path": "ippcp_evidence_package/package_manifest.csv",
+    "category": "package_meta",
+    "size_bytes": "",
+    "sha256": "",
+    "sanitized": false,
+    "included": true,
+    "exclusion_reason": "self-referential"
+  }
+]

@@ -1,0 +1,13 @@
+{
+  "asset_slug": "ippcp_ingesta_api_pull_pre_api_key",
+  "name": "IPPCP Ingesta API Pull PRE API Key",
+  "description": "Endpoint PRE de consulta GET de ingesta IPPCP con API key publicado como asset HttpData-PULL",
+  "type": "HttpData",
+  "base_url": "https://urbanismo.geoslab.com/servicios/ippcp-ingesta/api/intake",
+  "requires_provider_id_header": true,
+  "requires_api_key_header": true,
+  "content_kind": "json",
+  "extension": "json",
+  "media_type": "application/json",
+  "keywords": ["ippcp", "zaragoza", "ingesta", "api", "pull", "pre", "api-key"]
+}

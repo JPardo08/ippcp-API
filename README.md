@@ -1,434 +1,141 @@
-# IPPCP API automation
+# IPPCP API
 
-Este repositorio contiene scripts y documentación para operar por API el espacio de datos / EdD de IPPCP sobre conectores INESData. La finalidad es poder ejecutar las operaciones principales sin depender de la interfaz gráfica.
+## Overview
 
-El repositorio compartible para terceros será:
+This repository contains command-line automation and technical documentation for validating IPPCP data exchanges through an INESData data space.
+
+The current workflow publishes a provider asset, discovers it from a consumer connector, negotiates access, starts a transfer, retrieves an Endpoint Data Reference (EDR), and materializes an authorized local download.
+
+The implementation is currently operated through Bash phase scripts. A final backend API is not presented as implemented.
+
+## Architecture
+
+[![IPPCP logical architecture across city council and UPM infrastructures, provider and consumer connectors, and upstream data resources](docs/diagrams/ippcp-architecture.svg)](docs/diagrams/ippcp-architecture.svg)
+
+[Architecture](docs/architecture.md) is the current source for actors, control and data planes, security boundaries, and implementation status.
+
+## Supported flows
+
+The current public flows use `HttpData-PULL`:
+
+- [Ingestion API](docs/flows/ingestion-api.md): a protected JSON API whose upstream headers remain provider-side.
+- [WFS](docs/flows/wfs.md): current city and district-board GeoJSON layers.
+- [SPARQL](docs/flows/sparql.md): SPARQL Results JSON with an explicit response format.
+
+Each flow guide defines its asset configuration, flow-specific variables, complete execution block, semantic content validation, and common errors.
+
+## How the workflow works
+
+The current sequence is:
+
+```text
+phase0 -> phase1 -> phase2 -> phase3 -> phase4
+```
+
+- Phase 0 resolves context, authenticates provider and consumer connector roles, and performs smoke checks.
+- Phase 1 publishes provider policies, the asset, its data address, and the contract definition.
+- Phase 2 discovers the asset, negotiates access, and obtains the agreement.
+- Phase 3 starts the transfer and retrieves an EDR.
+- Phase 4 retrieves a current EDR, downloads data through the Data Plane, and writes a manifest with SHA-256.
+
+See [Execution phases](docs/execution-phases.md) for the canonical phase model and inherited state.
+
+## Requirements
+
+- Bash 4.3 or newer.
+- Git.
+- `curl` and `jq`.
+- Python 3, recommended for diagnostics.
+- Network access to the configured EdD connectors and selected upstream resource.
+- Provider and consumer EdD technical credentials for the configured dataspace/connectors.
+- Flow-specific upstream secrets only when required.
+
+Passwords, tokens, API keys, and EDR authorization must remain outside Git and public documentation.
+
+## Quick start
+
+Clone the repository URL supplied by the project and enter its root:
 
 ```bash
-git clone https://github.com/JPardo08/ippcp-API.git
+git clone "<repository-url>" ippcp-API
 cd ippcp-API
 ```
 
-La documentación operativa principal se centra en el dataspace actual validado `ippcp`, configurado en `flujos/ippcp/`. El dataspace `test3`, configurado en `flujos/test3/`, queda como histórico de pruebas y no debe confundirse con la operación actual de IPPCP.
+Then follow [Getting Started](docs/getting-started.md) to:
 
-## Qué automatiza
+1. select Bash and verify dependencies;
+2. prepare ignored provider and consumer credential files;
+3. select `IPPCP_DATASPACE`, `IPPCP_FLOW`, and `IPPCP_FLOW_VERSION=v2`;
+4. choose the Ingestion API, WFS, or SPARQL guide;
+5. run phase 0 through phase 4;
+6. verify the run summary, download, manifest, and SHA-256.
 
-Los scripts permiten ejecutar de forma reproducible:
+Do not copy a complete flow from historical or internal material. Use the current flow guides linked below.
 
-- autenticación contra Keycloak;
-- carga de configuración del dataspace;
-- carga de configuración de provider y consumer;
-- creación de assets;
-- creación de políticas;
-- creación de contract definitions;
-- consulta de catálogo;
-- negociación;
-- obtención de agreement;
-- transferencia;
-- descarga o consumo del dato;
-- generación de evidencias;
-- generación de `summary.json`.
+## Documentation
 
-## Estado actual
+Start here:
 
-El EdD específico de IPPCP ya está levantado. El dataspace `ippcp` ha sido corregido, probado y validado mediante automatización API.
+- [Getting Started](docs/getting-started.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Demo documentation](docs/demo/README.md)
 
-Se han probado correctamente tres assets reales:
+Canonical technical references:
 
-- ingesta / Excel-CSV mediante `InesDataStore`;
-- HTTP WFS mediante `HttpData`;
-- HTTP SPARQL mediante `HttpData`.
+- [Architecture](docs/architecture.md)
+- [Authentication](docs/authentication.md)
+- [Execution phases](docs/execution-phases.md)
+- [Evidence and traceability](docs/evidence-and-traceability.md)
+- [Backend integration](docs/backend-integration.md)
 
-Runs IPPCP validados:
+Flow guides:
 
-```text
-T1 ingesta / Excel-CSV: 1783070399
-T2 HTTP WFS:            1783070513
-T3 HTTP SPARQL:         1783070583
-```
+- [Ingestion API](docs/flows/ingestion-api.md)
+- [WFS](docs/flows/wfs.md)
+- [SPARQL](docs/flows/sparql.md)
 
-Estos runs generan evidencias locales bajo `evidencias/runs/<SUFFIX>/` y descargas verificadas bajo `downloads/`.
+The public entry path intentionally does not promote internal migration notes, archived procedures, raw evidence, or obsolete workshop documentation.
 
-## Requisitos previos
-
-Antes de ejecutar los flujos hace falta:
-
-- terminal Unix-like;
-- Bash 4.3 o superior;
-- `curl`;
-- `jq`;
-- `python3` recomendado;
-- cliente MinIO `mc` para el flujo de ingesta B2;
-- acceso de red a las URLs públicas del EdD;
-- usuario técnico provider con permisos en el conector provider;
-- usuario técnico consumer con permisos en el conector consumer;
-- cliente válido en Keycloak para obtener tokens;
-- configuración correcta de dataspace, provider, consumer y endpoints.
-
-En macOS puede haber dos rutas habituales de Bash moderno:
-
-```bash
-/usr/local/bin/bash --version
-/opt/homebrew/bin/bash --version
-```
-
-Define una variable para no repetir la ruta:
-
-```bash
-export BASH_BIN=/usr/local/bin/bash
-```
-
-Si tu Bash moderno está en Apple Silicon/Homebrew moderno:
-
-```bash
-export BASH_BIN=/opt/homebrew/bin/bash
-```
-
-En Linux o WSL suele bastar con:
-
-```bash
-bash --version
-which bash
-echo "$SHELL"
-```
-
-Si quieres fijarlo explícitamente:
-
-```bash
-export BASH_BIN="$(command -v bash)"
-```
-
-Para el flujo B2 de ingesta:
-
-```bash
-brew install minio/stable/mc
-```
-
-### Importante: usuarios API sin OTP
-
-Los usuarios técnicos usados por los scripts API no deben tener OTP / MFA interactivo activado.
-
-Motivo:
-
-- los scripts necesitan pedir tokens de forma automática;
-- el flujo de token usado por los scripts no puede responder a una pantalla interactiva de OTP;
-- si Keycloak exige OTP, la obtención de token falla;
-- la ejecución deja de ser reproducible;
-- para usuarios de UI puede tener sentido usar OTP;
-- para automatización API conviene usar usuarios técnicos separados, sin OTP, con permisos limitados y controlados.
-
-Recomendaciones:
-
-- usar un usuario técnico específico para provider;
-- usar un usuario técnico específico para consumer;
-- no reutilizar cuentas personales para automatización;
-- no guardar contraseñas reales en documentación;
-- no subir `user_provider.sh`, `user_consumer.sh`, `.env`, tokens ni secretos a Git.
-
-## Estructura real
-
-La estructura actual no es plana. El dataspace y los flujos están anidados:
-
-```text
-ippcp-API/
-  README.md
-  .gitignore
-  endpoints.sh
-  export_suffix.sh
-
-  flujos/
-    ippcp/
-      export_dataspace.sh
-      ingesta/
-        export_provider.sh
-        export_consumer.sh
-        user_provider.example.sh
-        user_consumer.example.sh
-        user_provider.sh          # local, no versionar
-        user_consumer.sh          # local, no versionar
-      consumo/
-        export_provider.sh
-        export_consumer.sh
-        user_provider.example.sh
-        user_consumer.example.sh
-        user_provider.sh          # local, no versionar
-        user_consumer.sh          # local, no versionar
-
-    test3/
-      export_dataspace.sh         # histórico / pruebas
-      ingesta/
-      consumo/
-
-  scripts/
-    lib_common.sh
-    phase0_context_smoke.sh
-    phase1_provider_publish.sh
-    phase1b_provider_upload_file.sh
-    phase2_consumer_negotiate.sh
-    phase3_transfer_edr.sh
-    phase3b_inesdata_transfer.sh
-    phase4_save_download.sh
-    phase4b_consumer_storage_fetch.sh
-
-  asset_configs/
-    real/
-      ingesta/
-      consumo/
-        wfs/
-        sparql/
-
-  evidencias/
-    runs/                         # generado localmente, no versionar
-
-  runtime/
-    env/
-      latest/                     # generado localmente, no versionar
-      backups/                    # generado localmente, no versionar
-
-  downloads/
-    assets/                       # generado localmente, no versionar
-    manifests/                    # generado localmente, no versionar
+## Current and legacy versions
 
-  docs/
-```
+`v2` is current and recommended for new integrations.
 
-Nota histórica: documentación antigua puede mencionar `export_dataspace.sh` en la raíz o rutas planas como `flujos/ingesta` y `flujos/consumo`. Esa estructura era anterior. Para IPPCP actual se debe usar `flujos/ippcp/ingesta` y `flujos/ippcp/consumo`.
+`v1` is retained as legacy-supported project material. It is not used by the recommended quick start.
 
-## Configuración inicial
-
-La configuración se carga en este orden conceptual:
+`test3`, discarded experiments, upstream JWT authentication, flat pre-versioned paths, and old workshop procedures are historical or obsolete.
 
-```bash
-source ./export_suffix.sh
-source ./flujos/ippcp/export_dataspace.sh
-source ./flujos/ippcp/<flujo>/export_provider.sh
-source ./flujos/ippcp/<flujo>/export_consumer.sh
-```
+The B2/CSV/InesDataStore T1 delivery remains a preserved evidence baseline. It is distinct from the recommended current `HttpData-PULL` integration.
 
-En la ejecución normal no hace falta cargar manualmente todos esos ficheros: `scripts/lib_common.sh` lo hace desde los scripts de fase. Aun así, entender el orden ayuda a diagnosticar errores.
+## Validation status
 
-Para ejecutar IPPCP se recomienda indicar siempre el flujo anidado:
+The current Ingestion API, WFS, and SPARQL flows have been validated end-to-end in the available PRE profile, including phase 4 download and manifest creation.
 
-```bash
-export IPPCP_FLOW=ingesta
-export IPPCP_FLOW_DIR="$PWD/flujos/ippcp/ingesta"
-export IPPCP_DATASPACE_DIR="$PWD/flujos/ippcp"
-```
+PRE is the currently validated environment profile, not a universal deployment requirement. Other environments require their own validated connector and upstream configuration.
 
-Para consumo:
+Public documentation does not publish internal connector hosts, execution identifiers, UUIDs, hashes, credentials, or raw business data.
 
-```bash
-export IPPCP_FLOW=consumo
-export IPPCP_FLOW_DIR="$PWD/flujos/ippcp/consumo"
-export IPPCP_DATASPACE_DIR="$PWD/flujos/ippcp"
-```
+See [Evidence and traceability](docs/evidence-and-traceability.md) for the distinction between internal evidence and approved publishable artifacts.
 
-Más detalle:
+## Security
 
-- [Configuración](docs/configuracion.md)
-- [Ejecución de flujos](docs/ejecucion_flujos.md)
-- [Evidencias](docs/evidencias.md)
-- [Problemas frecuentes](docs/troubleshooting.md)
+Never commit or publish:
 
-## Ejecución paso a paso
+- provider or consumer passwords;
+- connector tokens;
+- Ingestion API keys;
+- EDR authorization;
+- OAuth client secrets;
+- storage credentials;
+- ignored local credential or environment files;
+- sensitive URL parameters;
+- raw business data.
 
-### 1. Clonar el repositorio compartible
+Provider and consumer EdD credentials authenticate their configured connectors. Flow-specific upstream credentials protect a different network hop and must not be shared with the consumer.
 
-```bash
-git clone https://github.com/JPardo08/ippcp-API.git
-cd ippcp-API
-```
+Use run-specific summaries and redacted artifacts for diagnosis. Do not reproduce the internal EDR authorization candidate loop manually.
 
-### 2. Revisar requisitos
+## License and acknowledgements
 
-```bash
-command -v curl
-command -v jq
-command -v python3
-/usr/local/bin/bash --version
-```
+This repository is developed in the context of the IPPCP project and its INESData data-space integration.
 
-Si usas Apple Silicon y Homebrew instaló Bash en otra ruta:
-
-```bash
-/opt/homebrew/bin/bash --version
-```
-
-### 3. Definir Bash
-
-```bash
-export BASH_BIN=/usr/local/bin/bash
-```
-
-Si corresponde:
-
-```bash
-export BASH_BIN=/opt/homebrew/bin/bash
-```
-
-### 4. Preparar credenciales locales
-
-Para ingesta:
-
-```bash
-cp flujos/ippcp/ingesta/user_provider.example.sh flujos/ippcp/ingesta/user_provider.sh
-cp flujos/ippcp/ingesta/user_consumer.example.sh flujos/ippcp/ingesta/user_consumer.sh
-```
-
-Edita `flujos/ippcp/ingesta/user_provider.sh` y `flujos/ippcp/ingesta/user_consumer.sh` localmente con usuarios técnicos sin OTP.
-
-Para consumo:
-
-```bash
-cp flujos/ippcp/consumo/user_provider.example.sh flujos/ippcp/consumo/user_provider.sh
-cp flujos/ippcp/consumo/user_consumer.example.sh flujos/ippcp/consumo/user_consumer.sh
-```
-
-Edita `flujos/ippcp/consumo/user_provider.sh` y `flujos/ippcp/consumo/user_consumer.sh` localmente con usuarios técnicos sin OTP.
-
-### 5. Comprobar DNS / red del EdD
-
-Antes de lanzar fases, verifica que los conectores resuelven desde tu equipo:
-
-```bash
-nslookup conn-company-ippcp.ds.inesdata-project.eu
-nslookup conn-citycouncil-ippcp.ds.inesdata-project.eu
-curl -I https://conn-company-ippcp.ds.inesdata-project.eu
-curl -I https://conn-citycouncil-ippcp.ds.inesdata-project.eu
-```
-
-Si el DNS público aún no resuelve, puede ser necesario añadir temporalmente entradas en `/etc/hosts` según indique el equipo de infraestructura. No hagas esta sustitución a ciegas: confirma primero la IP vigente del EdD IPPCP.
-
-### 6. Ejecutar los tres flujos
-
-Los comandos completos están en [Ejecución de flujos](docs/ejecucion_flujos.md).
-
-Resumen:
-
-- ingesta / Excel-CSV: `phase0 -> phase1b -> phase2 -> phase3b -> phase4b`;
-- HTTP WFS: `phase0 -> phase1 -> phase2 -> phase3 -> phase4`;
-- HTTP SPARQL: `phase0 -> phase1 -> phase2 -> phase3 -> phase4`.
-
-## Flujos soportados
-
-### Flujo 1: asset de ingesta / Excel-CSV
-
-Este flujo publica un fichero local como asset `InesDataStore`, negocia el contrato y verifica que el dato llega al storage del consumer.
-
-Configuración operativa:
-
-- dataspace: `flujos/ippcp/export_dataspace.sh`;
-- flujo: `flujos/ippcp/ingesta/`;
-- provider: `conn-company-ippcp`;
-- consumer: `conn-citycouncil-ippcp`;
-- config de asset: `asset_configs/real/ingesta/ingesta_bbdd_residencial_2021_csv.json`;
-- fichero local requerido: `data/real/ingesta/BBDD_Residencial_2021.csv`.
-
-Comandos completos: [Flujo 1 en docs/ejecucion_flujos.md](docs/ejecucion_flujos.md#flujo-1-asset-de-ingesta--excel-csv).
-
-### Flujo 2: asset HTTP WFS
-
-Este flujo publica un endpoint HTTP WFS como asset `HttpData`, negocia el contrato y descarga el contenido consumido por EDR.
-
-Configuración operativa:
-
-- dataspace: `flujos/ippcp/export_dataspace.sh`;
-- flujo: `flujos/ippcp/consumo/`;
-- provider: `conn-citycouncil-ippcp`;
-- consumer: `conn-company-ippcp`;
-- config de asset: `asset_configs/real/consumo/wfs/emisiones_wfs_ciudad_geojson.json`.
-
-Comandos completos: [Flujo 2 en docs/ejecucion_flujos.md](docs/ejecucion_flujos.md#flujo-2-asset-http-wfs).
-
-### Flujo 3: asset HTTP SPARQL
-
-Este flujo publica un endpoint HTTP SPARQL como asset `HttpData`, negocia el contrato y descarga el resultado JSON consumido por EDR.
-
-Configuración operativa:
-
-- dataspace: `flujos/ippcp/export_dataspace.sh`;
-- flujo: `flujos/ippcp/consumo/`;
-- provider: `conn-citycouncil-ippcp`;
-- consumer: `conn-company-ippcp`;
-- config de asset: `asset_configs/real/consumo/sparql/emisiones_sparql_limit10_format_json.json`.
-
-Comandos completos: [Flujo 3 en docs/ejecucion_flujos.md](docs/ejecucion_flujos.md#flujo-3-asset-http-sparql).
-
-## Evidencias generadas
-
-Cada ejecución genera un identificador `SUFFIX`. En este repositorio no se usa el nombre `run_id` ni `correlation_id`; el identificador práctico es `SUFFIX`.
-
-Estructura principal:
-
-```text
-evidencias/runs/<SUFFIX>/
-  phase0/
-  phase1/
-  phase1b/
-  phase2/
-  phase3/
-  phase3b/
-  phase4/
-  phase4b/
-  summary.json
-```
-
-Las descargas verificadas se guardan en:
-
-```text
-downloads/assets/<ASSET_ID>/latest.<extension>
-downloads/manifests/<ASSET_ID>/latest.manifest.json
-```
-
-La entrega Excel/ZIP se genera con:
-
-```text
-tools/export_evidence_to_excel.py
-tools/package_evidence_bundle.py
-tools/evidence_export.tests.yaml
-```
-
-Más detalle: [Evidencias](docs/evidencias.md).
-
-## Seguridad
-
-No versionar:
-
-```text
-flujos/**/user_provider.sh
-flujos/**/user_consumer.sh
-.env
-*.key
-*.pem
-*token*
-*secret*
-phase*_env.sh
-runtime/env/latest/
-runtime/env/backups/
-evidencias/runs/
-downloads/assets/
-downloads/manifests/
-reports/
-```
-
-Los scripts no deben guardar tokens completos en evidencias. Los JSON de claims solo incluyen metadatos seguros como `iat`, `exp`, `now` y `token_length`.
-
-## Documentación complementaria
-
-- [Configuración](docs/configuracion.md)
-- [Ejecución de flujos](docs/ejecucion_flujos.md)
-- [Evidencias](docs/evidencias.md)
-- [Problemas frecuentes](docs/troubleshooting.md)
-- [scripts/scripts_README.md](scripts/scripts_README.md)
-- [tools/tools_README.md](tools/tools_README.md)
-- [runtime/runtime_README.md](runtime/runtime_README.md)
-- [downloads/downloads_README.md](downloads/downloads_README.md)
-- [data/real/real_README.md](data/real/real_README.md)
-- [flujos/ippcp/ingesta/ingesta_README.md](flujos/ippcp/ingesta/ingesta_README.md)
-- [flujos/ippcp/consumo/consumo_README.md](flujos/ippcp/consumo/consumo_README.md)
-
-## Histórico `test3`
-
-`flujos/test3/` conserva configuración y documentación de pruebas históricas. Sirve como referencia interna de evolución, pero no es la configuración operativa actual de IPPCP.
-
-Para operar el EdD de IPPCP validado se debe usar `flujos/ippcp/`.
+Copyright and usage terms are defined exclusively by the current [LICENSE](LICENSE). No additional permission, endorsement, or redistribution right is implied by this README.

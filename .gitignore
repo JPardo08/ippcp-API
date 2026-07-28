@@ -17,6 +17,14 @@ downloads/manifests/
 
 # Generated HTTP/curl responses
 data/real/consumo/responses/
+data/real/ingesta/responses/*
+!data/real/ingesta/responses/.gitkeep
+!data/real/ingesta/responses/pre/
+data/real/ingesta/responses/pre/*
+!data/real/ingesta/responses/pre/.gitkeep
+!data/real/ingesta/responses/pro/
+data/real/ingesta/responses/pro/*
+!data/real/ingesta/responses/pro/.gitkeep
 
 # Optional local real input data
 data/real/ingesta/*.csv
@@ -30,6 +38,8 @@ data/real/ingesta/*.zip
 *.key
 *token*
 *secret*
+data/real/ingesta/auth/*.env
+!data/real/ingesta/auth/*.env.example
 
 # Local flow credentials
 flujos/*/user_provider.sh
@@ -47,12 +57,6 @@ flujos/**/user_consumer.sh
 
 # Generated evidence delivery reports
 reports/
-
-# Documentation
-docs/*.pdf
-docs/repo_*.md
-docs/notion_*.md
-docs/audit_*.md
 
 # Python bytecode
 __pycache__/

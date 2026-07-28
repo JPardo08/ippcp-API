@@ -2,7 +2,7 @@
   "storage_mode": "inesdatastore",
   "asset_slug": "ippcp_ingesta_bbdd_residencial_2021_csv",
   "name": "IPPCP ingesta BBDD residencial 2021 CSV",
-  "description": "Fichero real de ingesta residencial 2021 para validación de upload local a InesDataStore",
+  "description": "Legacy T1 B2/CSV reproducibility: Fichero real de ingesta residencial 2021 para validación de upload local a InesDataStore",
   "type": "InesDataStore",
   "local_file": "data/real/ingesta/BBDD_Residencial_2021.csv",
   "store_folder": "ippcp-ingesta",

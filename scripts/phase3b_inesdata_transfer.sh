@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Historical T1 B2/CSV reproducibility path; not current T4 ingestion.
 # phase3b_inesdata_transfer.sh — Fase B2: transfer AmazonS3-PUSH → InesDataStore (consumer).
 #
 # No usa EDR ni HttpData-PULL. Prerrequisito: phase2 OK + phase1_env.sh con STORAGE_MODE=inesdatastore.

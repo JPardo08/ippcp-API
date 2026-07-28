@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# phase0_context_smoke.sh — Fase 0: contextualización y smoke test inicial (test3).
+# phase0_context_smoke.sh — Fase 0: contextualización y smoke test inicial.
 #
 # Requisitos: Bash 4.3+, curl, jq (ver scripts/scripts_README.md).
 #
@@ -12,6 +12,9 @@
 #   /opt/homebrew/bin/bash scripts/phase0_context_smoke.sh
 #
 # Uso:
+#   export IPPCP_DATASPACE=ippcp
+#   export IPPCP_FLOW=ingesta       # o consumo
+#   export IPPCP_FLOW_VERSION=v2
 #   /opt/homebrew/bin/bash scripts/phase0_context_smoke.sh
 
 set -euo pipefail
@@ -104,6 +107,10 @@ context_tmp="${context_file}.$$"
   printf 'Fecha: %s\n' "$(date)"
   printf 'API_ROOT=%s\n' "${API_ROOT}"
   printf 'DS_NAME=%s\n' "${DS_NAME}"
+  printf 'IPPCP_DATASPACE_DIR=%s\n' "${IPPCP_DATASPACE_DIR:-}"
+  printf 'IPPCP_FLOW=%s\n' "${IPPCP_FLOW:-}"
+  printf 'IPPCP_FLOW_VERSION=%s\n' "${IPPCP_FLOW_VERSION:-}"
+  printf 'IPPCP_FLOW_DIR=%s\n' "${IPPCP_FLOW_DIR:-}"
   printf 'KEYCLOAK_URL=%s\n' "${KEYCLOAK_URL}"
   printf 'PROVIDER=%s\n' "${PROVIDER}"
   printf 'PROVIDER_BASE=%s\n' "${PROVIDER_BASE}"
@@ -137,4 +144,4 @@ lib_export_phase_env 0
 lib_set_phase_status 0 ok
 
 trap - ERR
-lib_log INFO "Fase 0 OK — SUFFIX=${SUFFIX} RUN_DIR=${RUN_DIR}"
+lib_log INFO "Fase 0 OK — SUFFIX=${SUFFIX} RUN_DIR=${RUN_DIR} IPPCP_FLOW_DIR=${IPPCP_FLOW_DIR:-}"

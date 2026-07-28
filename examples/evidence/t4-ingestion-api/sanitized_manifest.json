@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "artifact_type": "sanitized-download-manifest",
+  "download": {
+    "status": "ok",
+    "byte_count": 1234,
+    "sha256_algorithm": "SHA-256",
+    "sha256_verified": true,
+    "sha256_value": "<withheld-pending-publication-approval>",
+    "payload_included": false
+  }
+}
