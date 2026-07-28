@@ -1,12 +1,11 @@
 # scripts/ — Automatización API IPPCP
 
-Librería compartida y scripts de fase para operar por API el EdD de IPPCP. La configuración operativa actual está en `flujos/ippcp/`. La configuración `flujos/test3/` queda como histórico de pruebas.
+Librería compartida y scripts de fase para operar por API el EdD de IPPCP. La configuración operativa actual está en `flujos/ippcp/v2/`. `flujos/ippcp/v1/` se conserva exclusivamente como legado reproducible.
 
-La estructura actual no es plana. `export_dataspace.sh` no vive en la raíz para la operación IPPCP; vive dentro de cada dataspace:
+Para IPPCP, `export_dataspace.sh` se resuelve desde la raíz del dataspace:
 
 ```text
 flujos/ippcp/export_dataspace.sh
-flujos/test3/export_dataspace.sh
 ```
 
 Los exports comunes de raíz son:
@@ -40,6 +39,11 @@ export BASH_BIN=/usr/local/bin/bash
 Desde cualquier carpeta, un script de fase hará:
 
 ```bash
+# El caller debe seleccionar el contexto antes de invocar la fase.
+export IPPCP_DATASPACE=ippcp
+export IPPCP_FLOW=ingesta       # o consumo
+export IPPCP_FLOW_VERSION=v2
+
 # shellcheck source=/dev/null
 source "${API_ROOT}/scripts/lib_common.sh"
 
@@ -49,67 +53,70 @@ lib_require_cmds
 lib_init_run_dirs     # evidencias/runs/${SUFFIX}/phase0..3
 ```
 
-### Flujo (`IPPCP_FLOW_DIR`)
+Si no se define un selector de dataspace ni puede inferirse uno desde
+`IPPCP_FLOW_DIR`, `lib_load_env` termina con un error accionable. `test3` solo
+se selecciona de forma explícita para reproducir pruebas históricas; nunca se
+usa como fallback.
 
-Para IPPCP actual se recomienda definir `IPPCP_FLOW_DIR` de forma explícita. Los exports de conector se cargan desde:
+### Flujo IPPCP (`IPPCP_FLOW_VERSION`)
+
+Para IPPCP actual se recomienda seleccionar dataspace, flujo y versión. `flujos/ippcp/export_dataspace.sh` resuelve la ruta completa del flujo:
 
 ```text
-flujos/ippcp/ingesta/export_provider.sh
-flujos/ippcp/ingesta/export_consumer.sh
-flujos/ippcp/consumo/export_provider.sh
-flujos/ippcp/consumo/export_consumer.sh
+flujos/ippcp/${IPPCP_FLOW_VERSION}/${IPPCP_FLOW}/export_provider.sh
+flujos/ippcp/${IPPCP_FLOW_VERSION}/${IPPCP_FLOW}/export_consumer.sh
 ```
 
 Las credenciales locales (ignoradas por Git) deben existir como:
 
 ```text
-flujos/ippcp/ingesta/user_provider.sh
-flujos/ippcp/ingesta/user_consumer.sh
-flujos/ippcp/consumo/user_provider.sh
-flujos/ippcp/consumo/user_consumer.sh
+flujos/ippcp/v2/ingesta/user_provider.sh
+flujos/ippcp/v2/ingesta/user_consumer.sh
+flujos/ippcp/v2/consumo/user_provider.sh
+flujos/ippcp/v2/consumo/user_consumer.sh
 ```
 
-Preparación local (ejemplo ingesta):
+Los ejemplos `v1` no forman parte de la preparación operativa actual; se conservan únicamente para reproducibilidad legacy.
+
+Preparación local (ejemplo ingesta v2):
 
 ```bash
-cp flujos/ippcp/ingesta/user_provider.example.sh flujos/ippcp/ingesta/user_provider.sh
-cp flujos/ippcp/ingesta/user_consumer.example.sh flujos/ippcp/ingesta/user_consumer.sh
+cp flujos/ippcp/v2/ingesta/user_provider.example.sh flujos/ippcp/v2/ingesta/user_provider.sh
+cp flujos/ippcp/v2/ingesta/user_consumer.example.sh flujos/ippcp/v2/ingesta/user_consumer.sh
 # editar ambos ficheros localmente con credenciales reales
 ```
 
-Seleccionar ingesta IPPCP:
+Seleccionar ingesta IPPCP v2:
 
 ```bash
+export IPPCP_DATASPACE=ippcp
 export IPPCP_FLOW=ingesta
-export IPPCP_FLOW_DIR="$PWD/flujos/ippcp/ingesta"
-export IPPCP_DATASPACE_DIR="$PWD/flujos/ippcp"
+export IPPCP_FLOW_VERSION=v2
 $BASH_BIN scripts/phase0_context_smoke.sh
 ```
 
-Seleccionar consumo IPPCP:
+Seleccionar consumo IPPCP v2:
 
 ```bash
+export IPPCP_DATASPACE=ippcp
 export IPPCP_FLOW=consumo
-export IPPCP_FLOW_DIR="$PWD/flujos/ippcp/consumo"
-export IPPCP_DATASPACE_DIR="$PWD/flujos/ippcp"
+export IPPCP_FLOW_VERSION=v2
 $BASH_BIN scripts/phase0_context_smoke.sh
 ```
 
-No usar `flujos/test3/` salvo para reproducir pruebas históricas.
+`IPPCP_FLOW_VERSION` admite `v1` o `v2`. `v2` es la versión actual y predeterminada; `v1` se conserva únicamente como legado reproducible.
 
-Si `IPPCP_FLOW_DIR` no está definido, `lib_common.sh` usa `flujos/${IPPCP_FLOW}` como ruta por defecto. En el repo actual de IPPCP eso puede producir errores como `Missing flow export: .../flujos/ingesta/export_provider.sh`. Para operación IPPCP actual, define siempre `IPPCP_FLOW_DIR` como se muestra arriba.
+`IPPCP_FLOW_DIR` sigue disponible como override avanzado/troubleshooting. Si ya viene definido desde el entorno, no se sobreescribe.
 
 ### Dataspace (`IPPCP_DATASPACE_DIR`)
 
-El dataspace se carga desde un `export_dataspace.sh` configurable. Si se usa
-`IPPCP_FLOW_DIR`, se intenta inferir desde el directorio padre del flujo:
+El dataspace se carga desde un `export_dataspace.sh` configurable. Para IPPCP actual:
 
-```text
-IPPCP_FLOW_DIR=flujos/ippcp/ingesta -> flujos/ippcp/export_dataspace.sh
-IPPCP_FLOW_DIR=flujos/test3/ingesta -> flujos/test3/export_dataspace.sh
+```bash
+export IPPCP_DATASPACE=ippcp
 ```
 
-También puede indicarse explícitamente:
+También puede indicarse explícitamente el directorio de dataspace:
 
 ```bash
 IPPCP_DATASPACE_DIR=flujos/ippcp /usr/local/bin/bash scripts/phase0_context_smoke.sh
@@ -155,7 +162,7 @@ Artefactos HTTP: `{step}.json` (body) + `{step}.http` (código). Nunca mezclar e
 
 Tras ejecutar las fases funcionales, la entrega Excel/ZIP se genera desde `tools/` sin cambiar las evidencias originales ni la lógica de los scripts de fase.
 
-En B1, `transfer_state=STARTED` puede convivir con `data_consumed=ok` y `save_download=ok`. Si hay `bytes` y `sha256`, la descarga material está verificada.
+En B1, `transfer_state=STARTED` puede convivir con `phase3.edr_obtained=ok`. La descarga material queda verificada solo cuando `phase4.save_download=ok` incluye `bytes` y `sha256`.
 
 En B2, `transfer_state=STARTED` puede convivir con `phase4b.storage_fetch=ok`. Si hay `bytes` y `sha256`, la descarga desde consumer MinIO está verificada.
 
@@ -186,7 +193,7 @@ Los claims JWT (`lib_jwt_claims_to_json`) solo persisten: `role`, `iat`, `exp`, 
 
 Si `runtime/env/latest/phaseN_env.sh` ya existe y contiene un `SUFFIX` distinto al actual, se crea un backup en `runtime/env/backups/phaseN_env.sh.bak.<SUFFIX>` antes de sobrescribir.
 
-Variables opcionales: `IPPCP_ENV_DIR`, `IPPCP_ENV_BACKUP_DIR` (ver `runtime/runtime_README.md`).
+Variables opcionales: `IPPCP_ENV_DIR`, `IPPCP_ENV_BACKUP_DIR` (ver `docs/getting-started.md` y `docs/evidence-and-traceability.md`).
 
 ### `lib_curl_json` y respuestas vacías
 
@@ -204,9 +211,9 @@ lib_curl_json "${artifact}" --allow-empty-body \
 - `phase1_provider_publish.sh` — publicación provider (vocab, policies, asset HttpData configurable, contract definition, catálogo). Rechaza configs B2 (`storage_mode=inesdatastore`).
 - `phase1b_provider_upload_file.sh` — Fase B2: upload local → InesDataStore (S3 chunk + finalize), policies, CD; escribe `phase1_env.sh` (compat phase2) y `phase1b_env.sh`
 - `phase2_consumer_negotiate.sh` — consumer: catálogo remoto, negociación y `AGREEMENT_ID`
-- `phase3_transfer_edr.sh` — consumer: transfer HttpData-PULL, EDR y consumo del endpoint del asset (JSON, text o binary)
+- `phase3_transfer_edr.sh` — consumer: transfer HttpData-PULL y obtención de EDR. No consume datos por defecto.
 - `phase3b_inesdata_transfer.sh` — Fase B2: transfer `AmazonS3-PUSH` → `InesDataStore` (sin EDR)
-- `phase4_save_download.sh` — copia local de `phase3/40_data_response.<extension>` a `downloads/assets/` con manifest en `downloads/manifests/` (solo A/B1 HttpData)
+- `phase4_save_download.sh` — consume el EDR, guarda `phase4/40_data_response.<extension>` y copia a `downloads/assets/` con manifest en `downloads/manifests/` (solo A/B1 HttpData)
 - `phase4b_consumer_storage_fetch.sh` — Fase B2: descarga real desde MinIO consumer con `mc` (config temporal)
 
 ## ASSET_CONFIG
@@ -269,6 +276,8 @@ Recomendación: probar primero con un CSV o TXT pequeño antes de Excel/ZIP.
 | `media_type` | no | Default según extensión (ver tabla abajo) |
 | `keywords` | no | Array de strings; default `[]` |
 | `asset_id` | no | Si omitido: `${asset_slug}-${SUFFIX}`; si explícito: `^[A-Za-z0-9._-]+$` |
+| `requires_provider_id_header` | no | Booleano. Si `true`, Fase 1 requiere `INGESTA_API_PROVIDER_ID` numérico y añade `X-Provider-Id` al `dataAddress` |
+| `requires_api_key_header` | no | Booleano. Si `true`, Fase 1 requiere `INGESTA_API_KEY` y añade `X-Api-Key` al `dataAddress`; la evidencia persiste solo `<redacted>` |
 
 Pares `content_kind` / `extension` válidos:
 
@@ -352,7 +361,7 @@ PHASE1_DEBUG=1 ASSET_CONFIG=asset_configs/demo/http/http_jsonplaceholder_todos.j
 $BASH_BIN scripts/phase1_provider_publish.sh
 ```
 
-## Fase B2 — InesDataStore (upload local + AmazonS3-PUSH)
+## Fase B2 — InesDataStore (legado reproducible T1)
 
 Flujo paralelo a A/B1. **No mezclar** con `phase3_transfer_edr.sh` ni `phase4_save_download.sh`.
 
@@ -449,9 +458,9 @@ jq . "downloads/manifests/${ASSET_ID}/latest.manifest.json"
 
 ## Assets reales IPPCP validados
 
-Configs en `asset_configs/real/consumo/` y `asset_configs/real/ingesta/`. Datos y curls de referencia en `data/real/` (ver `data/real/real_README.md` y `data/real/consumo/consumo_README.md`).
+Configs en `asset_configs/real/consumo/` y `asset_configs/real/ingesta/`. Las guías canónicas están en `docs/flows/ingestion-api.md`, `docs/flows/wfs.md` y `docs/flows/sparql.md`.
 
-Los scripts curl de `data/real/consumo/wfs/` y `data/real/consumo/sparql/` incluyen header `Accept` explícito. La automatización B1 (`phase3_transfer_edr.sh`) **no** inyecta `Accept` al endpoint final; si SPARQL devuelve HTML/XML, habrá que extender el schema de `ASSET_CONFIG` con headers HTTP.
+Los scripts curl de `data/real/consumo/wfs/` y `data/real/consumo/sparql/` incluyen header `Accept` explícito. La automatización B1 (`phase4_save_download.sh`) **no** inyecta `Accept` al endpoint final; si SPARQL devuelve HTML/XML, habrá que extender el schema de `ASSET_CONFIG` con headers HTTP.
 
 **No ejecutar** configs `*_pending*` ni `*.pending.json` hasta confirmación municipal.
 
@@ -480,6 +489,29 @@ $BASH_BIN scripts/phase1_provider_publish.sh
 
 Run validado: `1783070583`.
 
+### Ingesta API Pull PRE (B1 disponible)
+
+```bash
+source data/real/ingesta/auth/ingesta_api_key.env
+ASSET_CONFIG=asset_configs/real/ingesta/ingesta_api_pull_pre_api_key.json \
+$BASH_BIN scripts/phase1_provider_publish.sh
+unset INGESTA_API_KEY INGESTA_API_PROVIDER_ID
+```
+
+Usar PRE para pruebas iniciales. El flujo validado cubre `phase1 -> phase2 -> phase3 -> phase4`.
+
+`asset_configs/real/ingesta/ingesta_api_pull_pre_api_key.json` declara `requires_provider_id_header=true` y `requires_api_key_header=true`. Fase 1 exige ambas variables y añade `header:X-Provider-Id` y `header:X-Api-Key` al payload real.
+
+La API key se carga desde un fichero local ignorado, no se imprime ni se exporta a `phase1_env.sh`, y aparece como `<redacted>` en evidencias persistidas. El asset no utiliza JWT upstream.
+
+Prueba directa PRE autorizada:
+
+```bash
+data/real/ingesta/pre/curl_ingesta_api_pull_pre_base.sh
+```
+
+Las variantes de consulta no confirmadas y las configuraciones PRO preparatorias están excluidas de la guía pública actual.
+
 ### CSV ingesta real (B2)
 
 ```bash
@@ -487,9 +519,9 @@ ASSET_UPLOAD_CONFIG=asset_configs/real/ingesta/ingesta_bbdd_residencial_2021_csv
 $BASH_BIN scripts/phase1b_provider_upload_file.sh
 ```
 
-Run validado: `1783070399`.
+Este flujo conserva el baseline histórico T1 B2/CSV para reproducibilidad.
 
-Flujo completo B1: phase1 → phase2 → phase3 → phase4. Flujo completo B2: phase1b → phase2 → phase3b → phase4b.
+Flujo B1 actual validado: phase1 → phase2 → phase3 → phase4. Flujo B2 histórico, conservado para reproducibilidad: phase1b → phase2 → phase3b → phase4b.
 
 ## Ejecución
 
@@ -520,6 +552,12 @@ source runtime/env/latest/phase2_env.sh
 $BASH_BIN scripts/phase3_transfer_edr.sh
 ```
 
+Fase 3 termina al obtener un EDR resoluble. No descarga datos por defecto. El comportamiento antiguo de consumo en Fase 3 queda disponible solo como compatibilidad explícita:
+
+```bash
+PHASE3_TRY_DATA_CONSUMPTION=1 $BASH_BIN scripts/phase3_transfer_edr.sh
+```
+
 Relanzar Fase 2 en la misma ejecución (si ya hay `AGREEMENT_ID` en `phase2_env.sh`):
 
 ```bash
@@ -538,12 +576,14 @@ Continuar Fase 3 tras fallo en EDR (sin crear transfer nuevo):
 PHASE3_RESUME=1 $BASH_BIN scripts/phase3_transfer_edr.sh
 ```
 
-Tras phase3 OK, guardar la descarga local:
+Tras phase3 OK, consumir el EDR y guardar la descarga local:
 
 ```bash
 source runtime/env/latest/phase3_env.sh
 $BASH_BIN scripts/phase4_save_download.sh
 ```
+
+Para Ingesta API, ejecutar phase4 normal. La autenticación upstream ya está configurada en el asset mediante `header:X-Api-Key` y `header:X-Provider-Id`; no usar el modo JWT upstream histórico.
 
 Resultado:
 

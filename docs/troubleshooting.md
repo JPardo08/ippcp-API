@@ -1,469 +1,932 @@
-# Problemas frecuentes
+# Troubleshooting
 
-Esta guía ayuda a diagnosticar errores habituales al operar el EdD de IPPCP por API.
+## Purpose
 
-La configuración operativa actual está en `flujos/ippcp/`. `flujos/test3/` es histórico de pruebas.
+This guide covers the current `v2` `HttpData-PULL` execution path. Start with [Getting Started](getting-started.md), then use the flow-specific guide:
 
-## El host del conector no resuelve
+- [Ingestion API](flows/ingestion-api.md)
+- [WFS](flows/wfs.md)
+- [SPARQL](flows/sparql.md)
 
-### Síntoma
+Do not paste passwords, tokens, API keys, EDR authorization, connector hosts, or raw evidence into support requests.
 
-`phase0_context_smoke.sh` obtiene JWT correctamente, pero falla el smoke:
+## Diagnostic principles
 
-```text
-curl: (6) Could not resolve host: conn-company-ippcp.ds.inesdata-project.eu
-```
+Before changing state:
 
-Después aparece:
+1. identify the last phase whose status is `ok`;
+2. identify the expected `SUFFIX`;
+3. use the run-specific `summary.json` and phase artifacts;
+4. confirm that every sourced phase environment has the same `SUFFIX`;
+5. inspect `.http`, redacted JSON, and attempt-summary files before raw payloads;
+6. stop when a prerequisite phase has failed.
 
-```text
-source: no such file or directory: runtime/env/latest/phase0_env.sh
-```
-
-### Causa
-
-El token de Keycloak se obtuvo bien, pero el host público del conector no resuelve desde tu equipo. Como `phase0` falló antes de terminar, no se generó `runtime/env/latest/phase0_env.sh`.
-
-### Comprobación
-
-```bash
-nslookup conn-company-ippcp.ds.inesdata-project.eu
-nslookup conn-citycouncil-ippcp.ds.inesdata-project.eu
-curl -I https://conn-company-ippcp.ds.inesdata-project.eu
-curl -I https://conn-citycouncil-ippcp.ds.inesdata-project.eu
-```
-
-### Solución
-
-- Confirmar DNS público, VPN o red correcta.
-- Confirmar con infraestructura si hace falta una entrada temporal en `/etc/hosts`.
-- No seguir con Fase 1 hasta que `phase0` termine con `Fase 0 OK`.
-
-## `TOKEN` no está definido
-
-### Síntoma
-
-Al intentar decodificar un JWT:
+`runtime/env/latest/` is mutable convenience state. The historical source of truth is:
 
 ```text
-KeyError: 'TOKEN'
+evidencias/runs/${SUFFIX}/
 ```
 
-### Causa
+## Environment and repository setup
 
-Se ejecutó `export TOKEN` sin asignarle ningún valor.
+### Issue: a phase cannot find the repository root
 
-### Solución
+**Symptom**
 
-No pegues tokens completos en la terminal ni documentación. Si necesitas validar claims, usa los ficheros seguros que genera Fase 0:
+The script reports that it cannot find the API root or a required repository file.
+
+**Likely cause**
+
+- The command is running outside the cloned repository.
+- The checkout is incomplete.
+- The script was copied away from the repository instead of executed in place.
+
+**Checks**
 
 ```bash
-jq . evidencias/runs/<SUFFIX>/phase0/jwt_claims_provider.json
-jq . evidencias/runs/<SUFFIX>/phase0/jwt_claims_consumer.json
+pwd
+test -f endpoints.sh
+test -f export_suffix.sh
+test -f scripts/lib_common.sh
 ```
 
-Si estás haciendo una prueba manual, asigna `TOKEN` solo en tu terminal local y no lo copies a documentación.
+**Corrective action**
 
-## `zsh: no such file or directory` con URLs entre `< >`
+Change to the repository root and run the original script from `scripts/`. Restore missing tracked files from the repository rather than recreating them manually.
 
-### Síntoma
+### Issue: Bash or required commands are unavailable
+
+**Symptom**
+
+The shell reports syntax errors around associative arrays or name references, or the script reports that `curl` or `jq` is unavailable.
+
+**Likely cause**
+
+- Bash is older than 4.3.
+- The selected `BASH_BIN` is incorrect.
+- A required command is not installed or not on `PATH`.
+
+**Checks**
+
+```bash
+bash_bin="${BASH_BIN:-$(command -v bash)}"
+"${bash_bin}" --version
+command -v curl
+command -v jq
+command -v python3
+```
+
+**Corrective action**
+
+Install or select Bash 4.3 or newer, `curl`, and `jq`. Python 3 is recommended for claim diagnostics. Re-run the failed phase with the corrected Bash executable.
+
+### Issue: connector network access fails
+
+**Symptom**
+
+Phase 0 reports name-resolution, connection, timeout, or TLS errors and does not produce `phase0_env.sh`.
+
+**Likely cause**
+
+- The configured connector network is unavailable.
+- Required VPN, DNS, proxy, or routing is missing.
+- The selected environment profile is not reachable from the current machine.
+
+**Checks**
+
+Verify network access using connector addresses supplied by the environment owner. Do not copy those addresses into public documentation or support messages.
+
+Check that phase 0 did not complete:
+
+```bash
+test -f runtime/env/latest/phase0_env.sh
+```
+
+**Corrective action**
+
+Restore the approved network path before retrying phase 0. Do not create a phase environment manually. Add local DNS overrides only when the infrastructure owner supplies and approves them.
+
+## Flow and version resolution
+
+### Issue: `IPPCP_FLOW` or `IPPCP_FLOW_VERSION` is incorrect
+
+**Symptom**
+
+The wrong connector configuration is loaded, a flow export is missing, or the selected asset does not match the intended resource.
+
+**Likely cause**
+
+- `IPPCP_FLOW` is not `ingesta` or `consumo`.
+- `IPPCP_FLOW_VERSION` is not explicitly set to `v2`.
+- A stale `IPPCP_FLOW_DIR`, `IPPCP_DATASPACE_DIR`, or `IPPCP_DATASPACE_FILE` overrides normal resolution.
+
+**Checks**
+
+```bash
+printf 'dataspace=%s\n' "${IPPCP_DATASPACE:-<unset>}"
+printf 'flow=%s\n' "${IPPCP_FLOW:-<unset>}"
+printf 'version=%s\n' "${IPPCP_FLOW_VERSION:-<unset>}"
+printf 'flow_dir=%s\n' "${IPPCP_FLOW_DIR:-<auto>}"
+```
+
+Expected current selections:
 
 ```text
-zsh: no such file or directory: https://...
+IPPCP_DATASPACE=ippcp
+IPPCP_FLOW=ingesta or consumo
+IPPCP_FLOW_VERSION=v2
 ```
 
-### Causa
+**Corrective action**
 
-En `zsh`, escribir una URL como `<https://...>` se interpreta como redirección de entrada, no como texto.
-
-### Solución
-
-No uses `< >` alrededor de URLs reales en comandos:
+For a clean selection:
 
 ```bash
-curl -sk -i -X POST "https://conn-company-ippcp.ds.inesdata-project.eu/management/v3/assets/request" \
-  -H "Content-Type: application/json" \
-  --data '{"@context":{"@vocab":"https://w3id.org/edc/v0.0.1/ns/"},"offset":0,"limit":1,"filterExpression":[]}'
+unset IPPCP_DATASPACE_FILE IPPCP_DATASPACE_DIR IPPCP_FLOW_DIR
+export IPPCP_DATASPACE=ippcp
+export IPPCP_FLOW="<ingesta-or-consumo>"
+export IPPCP_FLOW_VERSION=v2
 ```
 
-## Comentarios inline en `zsh`
+Then start a new phase 0. Use `ingesta` for Ingestion API and `consumo` for WFS or SPARQL.
 
-### Síntoma
+### Issue: execution falls back to historical `test3`
+
+**Symptom**
+
+Context artifacts identify the `test3` dataspace or unexpected historical connectors.
+
+**Likely cause**
+
+`IPPCP_DATASPACE` was unset and the compatibility fallback was selected.
+
+**Checks**
+
+```bash
+printf 'dataspace=%s\n' "${IPPCP_DATASPACE:-<unset>}"
+printf 'dataspace_file=%s\n' "${IPPCP_DATASPACE_FILE:-<auto>}"
+```
+
+Inspect the phase 0 context for the current run without publishing it.
+
+**Corrective action**
+
+Stop the run. Explicitly set `IPPCP_DATASPACE=ippcp`, select `v2`, unset advanced directory/file overrides, and start a new execution. Do not continue a `test3` run as if it were current IPPCP.
+
+### Issue: `runtime/env/latest` contains stale state
+
+**Symptom**
+
+A phase uses an unexpected asset, agreement, transfer, flow, or run identifier.
+
+**Likely cause**
+
+`runtime/env/latest/phaseN_env.sh` belongs to a different execution.
+
+**Checks**
+
+```bash
+for env_file in runtime/env/latest/phase{0,1,2,3}_env.sh; do
+  if [[ -f "${env_file}" ]]; then
+    printf '%s: ' "${env_file}"
+    awk -F= '/^export SUFFIX=/{print $2}' "${env_file}"
+  fi
+done
+```
+
+Compare those values with the intended run directory under `evidencias/runs/`.
+
+**Corrective action**
+
+Source the run-specific phase environment from the intended evidence directory, or restart from the last confirmed phase. Never edit IDs in a phase environment to force them to match.
+
+### Issue: `SUFFIX` differs between phases
+
+**Symptom**
+
+Artifacts and inherited identifiers refer to different run directories, or a later phase cannot find the expected connector object.
+
+**Likely cause**
+
+Phase files from different executions were sourced in one shell.
+
+**Checks**
+
+```bash
+: "${SUFFIX:?Source the intended phase environment first}"
+summary="evidencias/runs/${SUFFIX}/summary.json"
+jq -r '.suffix, (.phases | keys[])' "${summary}"
+```
+
+Compare `SUFFIX` in each run-specific `phaseN_env.sh`.
+
+**Corrective action**
+
+Stop. Open a clean shell, source only the expected run-specific phase environment, and continue from the next valid phase. If the chain cannot be proven, start a new run.
+
+## Phase 0: context and EdD authentication
+
+### Issue: provider or consumer credentials are missing
+
+**Symptom**
+
+Phase 0 reports a missing `user_provider.sh` or `user_consumer.sh`.
+
+**Likely cause**
+
+The ignored local credential files were not created beside the selected `v2` flow exports.
+
+**Checks**
+
+```bash
+flow_dir="flujos/ippcp/v2/${IPPCP_FLOW}"
+test -f "${flow_dir}/user_provider.sh"
+test -f "${flow_dir}/user_consumer.sh"
+test -f "${flow_dir}/user_provider.example.sh"
+test -f "${flow_dir}/user_consumer.example.sh"
+```
+
+**Corrective action**
+
+Copy the `.example.sh` files to the ignored names and populate them locally. Provider credentials must be valid for the configured provider connector; consumer credentials must be valid for the configured consumer connector. The file layout does not require different users for every data flow.
+
+### Issue: EdD authentication returns no token
+
+**Symptom**
+
+Phase 0 reports that it could not obtain the provider or consumer JWT.
+
+**Likely cause**
+
+- Incorrect username or password.
+- The technical user cannot complete non-interactive authentication.
+- Wrong dataspace, realm, or client configuration.
+- User provisioning is incomplete or disabled.
+
+**Checks**
+
+- Confirm the selected dataspace and flow.
+- Confirm both ignored credential files exist.
+- Confirm the technical users are enabled for the configured connector authentication process.
+- If an earlier run exists, inspect its redacted `jwt_claims_*.json`; do not inspect or paste the token.
+
+**Corrective action**
+
+Correct the local credential or identity configuration and rerun phase 0. Do not use a manual token request with a password on the command line.
+
+### Issue: one connector smoke check fails
+
+**Symptom**
+
+Provider or consumer asset-list smoke evidence has a non-success status.
+
+**Likely cause**
+
+- The corresponding technical user lacks connector permissions.
+- The connector base URL belongs to another environment.
+- Network access is incomplete.
+
+**Checks**
+
+```bash
+: "${SUFFIX:?Set the phase 0 run identifier}"
+cat "evidencias/runs/${SUFFIX}/phase0/01_provider_assets_smoke.http"
+cat "evidencias/runs/${SUFFIX}/phase0/02_consumer_assets_smoke.http"
+```
+
+**Corrective action**
+
+Correct the failing connector's access, role, or environment configuration. Both smoke checks must pass before phase 1.
+
+## Phase 1: asset and offer publication
+
+### Issue: phase 1 runs in an unsupported folder or context
+
+**Symptom**
+
+`ASSET_CONFIG` cannot be found, the wrong default asset is selected, or publication targets unexpected connectors.
+
+**Likely cause**
+
+- The command is not running from the repository root.
+- `ASSET_CONFIG` is relative to another directory.
+- The wrong flow/version was selected.
+- `ASSET_CONFIG` was omitted.
+
+**Checks**
+
+```bash
+pwd
+test -f scripts/phase1_provider_publish.sh
+test -f "${ASSET_CONFIG:-<missing>}"
+printf 'flow=%s version=%s\n' "${IPPCP_FLOW:-<unset>}" "${IPPCP_FLOW_VERSION:-<unset>}"
+```
+
+**Corrective action**
+
+Return to the repository root, source the matching `phase0_env.sh`, and set the exact `ASSET_CONFIG` from the selected [flow guide](getting-started.md#select-a-flow) before rerunning phase 1.
+
+### Issue: asset configuration is rejected
+
+**Symptom**
+
+Phase 1 reports invalid JSON, missing fields, unsupported content kind/extension, an invalid base URL, or an InesDataStore configuration.
+
+**Likely cause**
+
+The selected file is malformed or belongs to the separate B2 baseline rather than the current `HttpData-PULL` path.
+
+**Checks**
+
+```bash
+jq empty "${ASSET_CONFIG}"
+jq '{type, content_kind, extension, media_type}' "${ASSET_CONFIG}"
+```
+
+The current phase 1 requires `type=HttpData`.
+
+**Corrective action**
+
+Select a current configuration from the Ingestion API, WFS, or SPARQL guide. Do not route an InesDataStore configuration through the current phase 1 script.
+
+### Issue: publication returns HTTP 409
+
+**Symptom**
+
+Phase 1 reports that a resource derived from the current `SUFFIX` already exists.
+
+**Likely cause**
+
+The same run identifier was reused for immutable provider resources.
+
+**Checks**
+
+```bash
+: "${SUFFIX:?Source phase0_env.sh}"
+jq '.phases.phase1' "evidencias/runs/${SUFFIX}/summary.json"
+```
+
+**Corrective action**
+
+Start a new execution with a new `SUFFIX`. The scripts do not implement provider cleanup or in-place asset mutation.
+
+### Issue: asset or offer is absent from the provider catalog
+
+**Symptom**
+
+Publication calls succeed, but phase 1 cannot find the asset in the provider self-catalog.
+
+**Likely cause**
+
+- Policy or contract-definition publication failed.
+- The asset, policy, and contract definition do not reference the same IDs.
+- Catalog propagation or connector authorization failed.
+
+**Checks**
+
+Inspect:
 
 ```text
-cp: conn-company-ippcp: Not a directory
+evidencias/runs/${SUFFIX}/phase1/
+evidencias/runs/${SUFFIX}/summary.json
 ```
 
-### Causa
+Focus on asset retrieval, contract-definition listing, self-catalog status, and catalog match.
 
-El comentario inline después de `#` no se interpretó como comentario en esa shell interactiva.
+**Corrective action**
 
-### Solución
+Fix the failed publication step and start a new execution if immutable objects were partially created. Do not invent or edit connector IDs in local state.
 
-Ejecuta el comando sin comentario al final:
+## Phase 2: negotiation and agreement
+
+### Issue: the catalog does not contain the expected asset
+
+**Symptom**
+
+Phase 2 cannot select `ASSET_ID` or an offer policy from the remote catalog.
+
+**Likely cause**
+
+- Phase 1 did not complete.
+- A stale `phase1_env.sh` was sourced.
+- Provider/consumer roles or protocol address are incorrect.
+- The asset is not visible under the published contract definition.
+
+**Checks**
 
 ```bash
-cp flujos/ippcp/ingesta/user_provider.example.sh flujos/ippcp/ingesta/user_provider.sh
-cp flujos/ippcp/ingesta/user_consumer.example.sh flujos/ippcp/ingesta/user_consumer.sh
+: "${SUFFIX:?Source the intended phase1_env.sh}"
+jq '.phases.phase1.status, .phases.phase2' "evidencias/runs/${SUFFIX}/summary.json"
 ```
 
-## El usuario API tiene OTP activado
+Inspect the remote catalog and selected-ID artifacts under `phase2/`.
 
-### Síntoma
+**Corrective action**
 
-El script falla al obtener token:
+Resolve phase 1/catalog visibility first. Source the matching `phase1_env.sh` and rerun phase 2 only when the asset and offer are present.
+
+### Issue: negotiation does not reach `FINALIZED` or produce an agreement
+
+**Symptom**
+
+Negotiation becomes `TERMINATED` or times out without `contractAgreementId`.
+
+**Likely cause**
+
+- Policy mismatch.
+- Stale asset or offer identifiers.
+- Consumer authentication expired during an external/manual operation.
+- Connector notification or protocol failure.
+
+**Checks**
+
+Inspect the negotiation response and state polling artifacts:
 
 ```text
-No se pudo obtener JWT para provider
-No se pudo obtener JWT para consumer
+evidencias/runs/${SUFFIX}/phase2/30_contract_negotiation_response.json
+evidencias/runs/${SUFFIX}/phase2/31_negotiation_state_*.json
+evidencias/runs/${SUFFIX}/phase2/32_negotiation_final_state.json
 ```
 
-Al probar con `curl`, Keycloak puede responder:
+The script polls up to 20 times with three-second intervals. The implemented success gate is a valid agreement ID. A `FINALIZED` display state is not sufficient without that ID, and a valid agreement ID can complete the implemented gate even when state reporting differs.
 
-```json
-{"error":"invalid_grant","error_description":"Invalid user credentials"}
+**Corrective action**
+
+Correct the policy, asset selection, or connector issue. `PHASE2_FORCE=1` is implemented only to relaunch phase 2 when `phase2_env.sh` already contains an agreement for the same `SUFFIX`; it creates another negotiation. Use it only after reviewing the existing run.
+
+### Issue: phase 2 refuses to relaunch
+
+**Symptom**
+
+The script reports that `phase2_env.sh` already contains `AGREEMENT_ID` for the current run.
+
+**Likely cause**
+
+Duplicate negotiation protection detected completed phase 2 state.
+
+**Checks**
+
+```bash
+: "${SUFFIX:?Source phase1_env.sh}"
+jq '.phases.phase2' "evidencias/runs/${SUFFIX}/summary.json"
 ```
 
-### Causa
+**Corrective action**
 
-Los scripts usan un flujo automatizado de token. Si el usuario tiene OTP / MFA interactivo, Keycloak espera un segundo paso manual. El script no puede introducir ese OTP.
+Continue to phase 3 if the agreement is valid. If a deliberate new negotiation is required for the same run, execute phase 2 with `PHASE2_FORCE=1`. This is not a cleanup or rollback mechanism.
 
-Para login por UI puede tener sentido usar OTP. Para automatización API no.
+## Phase 3: transfer and EDR
 
-### Solución
+### Issue: transfer does not reach `STARTED` or `COMPLETED`
 
-Usa usuarios técnicos sin OTP:
+**Symptom**
 
-- usuario técnico provider;
-- usuario técnico consumer;
-- permisos limitados;
-- sin required actions pendientes;
-- email verificado si Keycloak lo exige;
-- sin `Configure OTP` pendiente.
+Phase 3 times out, or the transfer becomes `TERMINATED` or `ERROR`.
 
-No uses usuarios personales de UI para automatización.
+**Likely cause**
 
-## URL de dataspace incorrecta
+- Invalid agreement or provider protocol address.
+- Transfer request rejected by a connector.
+- Connector/Data Plane availability problem.
 
-### Síntoma
+**Checks**
 
-El script obtiene token de un realm antiguo, por ejemplo `test3`, pero llama a conectores `ippcp`.
-
-Puede aparecer:
+Inspect:
 
 ```text
-HTTP 500
-publicKey is null
-JWT inválido
+evidencias/runs/${SUFFIX}/phase3/10_transfer_response.json
+evidencias/runs/${SUFFIX}/phase3/20_transfer_state_*.json
+evidencias/runs/${SUFFIX}/phase3/21_transfer_final_state.json
 ```
 
-### Causa
+The script polls up to 20 times with three-second intervals. The implemented accepted states are `STARTED` and `COMPLETED`.
 
-Se cargó un `export_dataspace.sh` que no corresponde al flujo actual.
+**Corrective action**
 
-### Comprobación
+Correct the underlying transfer failure. `PHASE3_FORCE=1` is implemented to create a new transfer when phase 3 state already exists for the same `SUFFIX`. It does not repair a failed transfer.
 
-```bash
-source ./flujos/ippcp/export_dataspace.sh
-echo "DS_NAME=$DS_NAME"
-echo "KEYCLOAK_URL=$KEYCLOAK_URL"
-echo "KC_CLIENT=$KC_CLIENT"
-```
+### Issue: EDR is not found after transfer start
 
-Debe salir:
+**Symptom**
+
+Phase 3 reports that no resolvable EDR was found.
+
+**Likely cause**
+
+- The EDR has not been materialized yet.
+- The transfer ID does not belong to the current run.
+- Consumer access or connector state is invalid.
+
+**Checks**
+
+Review:
 
 ```text
-DS_NAME=ippcp
+evidencias/runs/${SUFFIX}/phase3/30_edr_direct_*.http
+evidencias/runs/${SUFFIX}/phase3/30_edr_dataaddress_redacted.json
+evidencias/runs/${SUFFIX}/phase3/31_edrs_request_redacted.json
 ```
 
-Comprueba el flujo:
+Phase 3 already polls direct EDR retrieval up to 20 times with three-second intervals and then tries its implemented EDR-list fallback.
+
+**Corrective action**
+
+If the existing transfer is still valid, rerun phase 3 with `PHASE3_RESUME=1`. The script resolves and reuses `TRANSFER_ID`, checks transfer state, polls when appropriate, and retries EDR retrieval without creating a new transfer.
+
+Do not combine `PHASE3_RESUME=1` with `PHASE3_FORCE=1`; the script rejects that combination.
+
+### Issue: phase 3 refuses to run because transfer state exists
+
+**Symptom**
+
+The script reports that `phase3_env.sh` already contains `TRANSFER_ID`.
+
+**Likely cause**
+
+Duplicate-transfer protection detected prior phase 3 state for the same run.
+
+**Checks**
+
+Review the existing transfer state and whether the EDR step completed.
+
+**Corrective action**
+
+- Use the existing `phase3_env.sh` and continue to phase 4 when phase 3 is `ok`.
+- Use `PHASE3_RESUME=1` to continue the existing transfer after an EDR-stage failure.
+- Use `PHASE3_FORCE=1` only when a deliberate new transfer is required.
+
+These controls are mutually exclusive where the script enforces it and do not delete prior connector state.
+
+## Phase 4: download and manifest
+
+### Issue: phase 4 reports a failed prerequisite
+
+**Symptom**
+
+Phase 4 reports missing phase 3 state or `phases.phase3.status != ok`.
+
+**Likely cause**
+
+Phase 3 did not complete, or the wrong `phase3_env.sh` is loaded.
+
+**Checks**
 
 ```bash
-echo "IPPCP_FLOW=$IPPCP_FLOW"
-echo "IPPCP_FLOW_DIR=$IPPCP_FLOW_DIR"
+: "${SUFFIX:?Source phase3_env.sh}"
+jq -r '.phases.phase3.status' "evidencias/runs/${SUFFIX}/summary.json"
+printf 'transfer=%s\n' "${TRANSFER_ID:-<unset>}"
 ```
 
-Para ingesta IPPCP debe apuntar a:
+**Corrective action**
+
+Complete or resume phase 3 first. Phase 4 requires matching `SUFFIX`, `ASSET_ID`, `AGREEMENT_ID`, and `TRANSFER_ID`.
+
+### Issue: EDR is missing or expired in phase 4
+
+**Symptom**
+
+Phase 4 cannot resolve a current EDR even though phase 3 previously succeeded.
+
+**Likely cause**
+
+- The EDR is not currently available.
+- The transfer ID or sourced phase state is stale.
+- Consumer authentication or connector state is invalid.
+
+**Checks**
+
+Review phase 4 EDR status and redacted diagnostics:
 
 ```text
-flujos/ippcp/ingesta
+evidencias/runs/${SUFFIX}/phase4/30_edr_direct_*.http
+evidencias/runs/${SUFFIX}/phase4/30_edr_dataaddress_redacted.json
+evidencias/runs/${SUFFIX}/phase4/31_edrs_request_redacted.json
 ```
 
-Para consumo IPPCP debe apuntar a:
+Phase 4 automatically re-authenticates the consumer, polls direct EDR retrieval up to 20 times with three-second intervals, and uses its implemented EDR-list fallback.
+
+**Corrective action**
+
+First rerun phase 4 with the correct `phase3_env.sh`; this invokes the implemented EDR re-fetch. If the transfer itself is not valid, return to phase 3 and use `PHASE3_RESUME=1` only when its documented preconditions hold.
+
+### Issue: all Data Plane authorization attempts fail
+
+**Symptom**
+
+Phase 4 reports that it could not consume the EDR endpoint.
+
+**Likely cause**
+
+- EDR authorization is no longer valid.
+- Data Plane or upstream access fails.
+- The response is empty, non-successful, or invalid JSON for a JSON asset.
+
+**Checks**
+
+Inspect:
 
 ```text
-flujos/ippcp/consumo
+evidencias/runs/${SUFFIX}/phase4/42_data_attempts_summary.json
+evidencias/runs/${SUFFIX}/phase4/40_data_response_attempt_*.http
 ```
 
-## Provider mal configurado
+The current observed valid authorization representation is handled internally as `authorization_raw`. Other candidates are compatibility fallbacks implemented by the script.
 
-### Síntomas
+**Corrective action**
 
-- `401` al llamar al Management API del provider;
-- `403` al crear assets, policies o contract definitions;
-- `404` en endpoints de Management API;
-- asset no creado;
-- policy no creada;
-- contract definition no creada;
-- endpoint HTTP del recurso no accesible.
+Correct transfer, EDR, Data Plane, or upstream availability and rerun phase 4. Do not extract raw authorization or manually reproduce the candidate loop.
 
-### Comprobación
+### Issue: manifest is missing
 
-Para ingesta:
+**Symptom**
+
+The download may exist, but the run-specific manifest or `phase4/save_download` summary step is absent.
+
+**Likely cause**
+
+- Phase 4 failed after receiving data but before terminal completion.
+- Content validation failed.
+- Local copy or hashing failed.
+
+**Checks**
 
 ```bash
-source ./flujos/ippcp/export_dataspace.sh
-source ./flujos/ippcp/ingesta/export_provider.sh
-echo "PROVIDER=$PROVIDER"
-echo "PROVIDER_BASE=$PROVIDER_BASE"
-echo "PROVIDER_PROTOCOL=$PROVIDER_PROTOCOL"
+: "${SUFFIX:?Source phase3_env.sh}"
+jq '.phases.phase4' "evidencias/runs/${SUFFIX}/summary.json"
+test -f "downloads/manifests/${ASSET_ID}/${SUFFIX}.manifest.json"
 ```
 
-Para consumo:
+**Corrective action**
+
+Treat the run as incomplete. Resolve the recorded phase 4 failure and rerun phase 4. Do not create a manifest by hand.
+
+### Issue: downloaded JSON is invalid or unexpected
+
+**Symptom**
+
+HTTP status is successful, but phase 4 rejects JSON syntax or the flow guide's semantic check fails.
+
+**Likely cause**
+
+- Upstream returned HTML, XML, an error object, or truncated content.
+- The wrong asset configuration was published.
+- The response is valid JSON but not the expected domain structure.
+
+**Checks**
 
 ```bash
-source ./flujos/ippcp/export_dataspace.sh
-source ./flujos/ippcp/consumo/export_provider.sh
-echo "PROVIDER=$PROVIDER"
-echo "PROVIDER_BASE=$PROVIDER_BASE"
-echo "PROVIDER_PROTOCOL=$PROVIDER_PROTOCOL"
+download_file="downloads/assets/${ASSET_ID}/${SUFFIX}.${ASSET_EXTENSION:-json}"
+test -s "${download_file}"
+jq empty "${download_file}"
 ```
 
-### Solución
+Then run the semantic `jq` check from the selected flow guide.
 
-- Verifica que el provider corresponde al flujo.
-- Verifica que el usuario provider tiene rol del conector.
-- Verifica que `DS_NAME=ippcp`.
-- Ejecuta `phase0_context_smoke.sh` antes de publicar assets.
-- Revisa el body `.json` y el status `.http` en `evidencias/runs/<SUFFIX>/phase1/` o `phase1b/`.
+**Corrective action**
 
-## Consumer mal configurado
+Correct the upstream request or publish a new asset with the correct immutable data address. HTTP 200 alone is not acceptance.
 
-### Síntomas
+### Issue: a run-specific download already exists with different content
 
-- catálogo remoto no accesible;
-- negotiation no creada;
-- agreement no encontrado;
-- transfer fallida;
-- token consumer equivocado;
-- `401` o `403` en phase2 o phase3.
+**Symptom**
 
-### Comprobación
+Phase 4 refuses to overwrite the destination and requests `DOWNLOAD_FORCE=1`.
 
-Para ingesta:
+**Likely cause**
+
+The same `SUFFIX` and asset destination already contain bytes with a different SHA-256.
+
+**Checks**
+
+Compare the intended run, asset ID, existing run-specific manifest, byte count, and hash metadata.
+
+**Corrective action**
+
+If replacement is deliberate and the run identity is correct, rerun phase 4 with `DOWNLOAD_FORCE=1`. The implemented behavior is:
+
+- create the run-specific file when absent;
+- leave it unchanged when the existing hash matches;
+- reject a different hash unless `DOWNLOAD_FORCE=1`;
+- update mutable `latest.*` from the accepted run-specific file.
+
+`DOWNLOAD_FORCE` is overwrite permission, not a retry or connector cleanup mechanism.
+
+## Ingestion API
+
+### Issue: phase 1 reports a missing API key
+
+**Symptom**
+
+Phase 1 requires `INGESTA_API_KEY`.
+
+**Likely cause**
+
+The ignored Ingestion API environment was not sourced immediately before phase 1.
+
+**Checks**
+
+Confirm the local file exists without printing its values:
 
 ```bash
-source ./flujos/ippcp/export_dataspace.sh
-source ./flujos/ippcp/ingesta/export_consumer.sh
-echo "CONSUMER=$CONSUMER"
-echo "CONSUMER_BASE=$CONSUMER_BASE"
-echo "CONSUMER_PROTOCOL=$CONSUMER_PROTOCOL"
+test -f data/real/ingesta/auth/ingesta_api_key.env
 ```
 
-Para consumo:
+**Corrective action**
+
+Follow the [Ingestion API flow](flows/ingestion-api.md): source the ignored file immediately before phase 1, run phase 1, then unset `INGESTA_API_KEY` and `INGESTA_API_PROVIDER_ID` before phase 2.
+
+### Issue: provider ID is missing or non-numeric
+
+**Symptom**
+
+Phase 1 reports that `INGESTA_API_PROVIDER_ID` is required or must be numeric.
+
+**Likely cause**
+
+The variable is absent, contains a header prefix, or contains an identity-system identifier rather than the upstream application's numeric provider ID.
+
+**Checks**
 
 ```bash
-source ./flujos/ippcp/export_dataspace.sh
-source ./flujos/ippcp/consumo/export_consumer.sh
-echo "CONSUMER=$CONSUMER"
-echo "CONSUMER_BASE=$CONSUMER_BASE"
-echo "CONSUMER_PROTOCOL=$CONSUMER_PROTOCOL"
+if [[ "${INGESTA_API_PROVIDER_ID:-}" =~ ^[0-9]+$ ]]; then
+  echo "provider ID format: numeric"
+else
+  echo "provider ID format: invalid"
+fi
 ```
 
-### Solución
+**Corrective action**
 
-- Verifica que consumer y provider no están cruzados.
-- Verifica que el usuario consumer tiene rol del conector.
-- Verifica que estás cargando `flujos/ippcp/ingesta` para ingesta y `flujos/ippcp/consumo` para WFS/SPARQL.
-- Revisa `evidencias/runs/<SUFFIX>/phase2/`.
+Obtain the numeric provider ID from the upstream resource owner and update the ignored local environment. Do not publish or log it unnecessarily.
 
-## Token caducado o inválido
+### Issue: Ingestion phase 4 returns an upstream authorization failure
 
-### Síntoma
+**Symptom**
 
-Una fase que antes funcionaba empieza a devolver `401` o `403`.
+The EDR is resolved, but the upstream response is unauthorized, empty, or invalid JSON.
 
-### Causa
+**Likely cause**
 
-Los tokens expiran. Los scripts los renuevan por fase, pero si ejecutas comandos manuales puedes estar usando un token antiguo.
+The provider asset was published with a missing, invalid, or rotated API key/provider ID.
 
-### Solución
+**Checks**
 
-Ejecuta la fase de nuevo con el env correcto:
+- Review phase 1 redacted data-address evidence.
+- Review phase 4 HTTP status and attempt summary.
+- Optionally run the separate direct preflight documented in the flow guide.
+
+**Corrective action**
+
+Correct the provider-side secret and publish a new asset. The provider data address is immutable for this assessment. Run phase 4 normally; do not add the upstream key to the consumer environment.
+
+## WFS
+
+### Issue: WFS response is not expected GeoJSON
+
+**Symptom**
+
+The response is empty, invalid JSON, or valid JSON without the expected GeoJSON `FeatureCollection`.
+
+**Likely cause**
+
+- Upstream WFS is unavailable.
+- Wrong layer or request format.
+- Upstream returned an XML/HTML error document or an application error object.
+
+**Checks**
 
 ```bash
-source runtime/env/latest/phase0_env.sh
-$BASH_BIN scripts/phase1_provider_publish.sh
+download_file="downloads/assets/${ASSET_ID}/${SUFFIX}.json"
+jq -e '
+  type == "object"
+  and .type == "FeatureCollection"
+  and (.features | type == "array")
+' "${download_file}"
 ```
 
-Para validar un usuario sin imprimir tokens completos:
+**Corrective action**
 
-```bash
-curl -sS -w '\nHTTP=%{http_code}\n' -X POST "$KEYCLOAK_URL/realms/$DS_NAME/protocol/openid-connect/token" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  --data-urlencode "grant_type=password" \
-  --data-urlencode "client_id=$KC_CLIENT" \
-  --data-urlencode "username=<USERNAME>" \
-  --data-urlencode "password=<PASSWORD>" \
-  --data-urlencode "scope=openid profile email"
-```
+Select the validated city or district-board configuration required by the integration and publish a new asset if the data address was wrong. Do not accept HTTP 200 or generic JSON as GeoJSON proof.
 
-No pegues tokens completos en documentación ni chats.
+## SPARQL
 
-## Error al crear asset
+### Issue: SPARQL returns XML instead of SPARQL Results JSON
 
-### Síntomas
+**Symptom**
 
-- `phase1_provider_publish.sh` falla;
-- `phase1b_provider_upload_file.sh` falla;
-- `ASSET_CONFIG` inválido;
-- `ASSET_UPLOAD_CONFIG` inválido;
-- `HTTP 400`, `401`, `403`, `404` o `409`.
+The request returns HTTP 200, but `jq` rejects the body or the content is XML.
 
-### Causas posibles
+**Likely cause**
 
-- payload incompatible;
-- endpoint Management API incorrecto;
-- credenciales insuficientes;
-- URL HTTP del recurso no accesible desde el provider/dataplane;
-- datos obligatorios ausentes;
-- asset ya existe para el mismo `SUFFIX`;
-- se usó config B2 con `phase1_provider_publish.sh`;
-- se usó config HTTP con `phase1b_provider_upload_file.sh`.
+A legacy/noncanonical configuration omitted the explicit SPARQL Results JSON format.
 
-### Solución
+**Checks**
 
-Revisa el config:
-
-```bash
-jq . asset_configs/real/consumo/wfs/emisiones_wfs_ciudad_geojson.json
-jq . asset_configs/real/consumo/sparql/emisiones_sparql_limit10_format_json.json
-jq . asset_configs/real/ingesta/ingesta_bbdd_residencial_2021_csv.json
-```
-
-Revisa evidencias:
-
-```bash
-find "evidencias/runs/$SUFFIX/phase1" -maxdepth 1 -type f
-find "evidencias/runs/$SUFFIX/phase1b" -maxdepth 1 -type f
-```
-
-## Error en contract definition
-
-### Síntomas
-
-- policy creada pero contract definition no creada;
-- `CD_ID` vacío;
-- `phase1` o `phase1b` falla al final.
-
-### Causas posibles
-
-- `ASSET_ID` incorrecto;
-- `CONTRACT_POLICY_ID` incorrecto;
-- permisos insuficientes;
-- payload incompatible con la versión del conector;
-- asset no visible en el catálogo local.
-
-### Solución
-
-Revisa:
-
-```bash
-echo "ASSET_ID=$ASSET_ID"
-echo "CONTRACT_POLICY_ID=$CONTRACT_POLICY_ID"
-echo "CD_ID=$CD_ID"
-```
-
-Revisa `summary.json`:
-
-```bash
-jq . "evidencias/runs/$SUFFIX/summary.json"
-```
-
-## Error en negotiation, agreement o transfer
-
-### Síntomas
-
-- `phase2_consumer_negotiate.sh` no llega a `AGREED` o `FINALIZED`;
-- `AGREEMENT_ID` vacío;
-- `phase3_transfer_edr.sh` no obtiene EDR;
-- `phase3b_inesdata_transfer.sh` no obtiene transferencia;
-- `phase4_save_download.sh` no encuentra datos;
-- `phase4b_consumer_storage_fetch.sh` no puede descargar desde MinIO.
-
-### Causas posibles
-
-- provider y consumer cruzados;
-- `contractDefinitionId` incorrecto;
-- catálogo no actualizado;
-- token del consumer equivocado;
-- asset no disponible en provider;
-- recurso HTTP externo no accesible desde dataplane;
-- transferencia B2 sin credenciales S3 útiles;
-- se mezclaron envs de otro `SUFFIX`.
-
-### Solución
-
-Comprueba el `SUFFIX` cargado:
-
-```bash
-echo "SUFFIX=$SUFFIX"
-```
-
-Comprueba que no estás mezclando runs:
-
-```bash
-source runtime/env/latest/phase1_env.sh
-echo "SUFFIX=$SUFFIX"
-source runtime/env/latest/phase2_env.sh
-echo "SUFFIX=$SUFFIX"
-```
-
-Revisa phase2:
-
-```bash
-find "evidencias/runs/$SUFFIX/phase2" -maxdepth 1 -type f
-```
-
-Revisa phase3 o phase3b:
-
-```bash
-find "evidencias/runs/$SUFFIX/phase3" -maxdepth 1 -type f
-find "evidencias/runs/$SUFFIX/phase3b" -maxdepth 1 -type f
-```
-
-## Estructura plana antigua
-
-### Síntoma
-
-Un comando o README menciona:
+Confirm:
 
 ```text
-flujos/ingesta
-flujos/consumo
-export_dataspace.sh en raíz
+ASSET_CONFIG=asset_configs/real/consumo/sparql/emisiones_sparql_limit10_format_json.json
 ```
 
-### Causa
+Validate the local download:
 
-Esa era una estructura anterior.
+```bash
+download_file="downloads/assets/${ASSET_ID}/${SUFFIX}.json"
+jq -e '
+  type == "object"
+  and (.head | type == "object")
+  and (.results | type == "object")
+  and (.results.bindings | type == "array")
+' "${download_file}"
+```
 
-### Solución
+**Corrective action**
 
-Para IPPCP actual usa:
+Use the canonical JSON-format configuration and publish a new asset. Do not relabel XML as JSON and do not treat HTTP 200 as content validation.
+
+### Issue: SPARQL JSON has the wrong structure
+
+**Symptom**
+
+`jq empty` succeeds, but `head` or `results.bindings` is absent.
+
+**Likely cause**
+
+The upstream returned a generic JSON error, the encoded query is wrong, or a different API response was published.
+
+**Checks**
+
+Run the structural check from the [SPARQL flow](flows/sparql.md) and review only the local authorized result.
+
+**Corrective action**
+
+Validate query and result format together, then publish a new asset with the corrected immutable data address.
+
+## Evidence and secret handling
+
+### Issue: a secret is detected in evidence
+
+**Symptom**
+
+A script redaction assertion or evidence scan detects a password, token-like value, API-key value, EDR authorization, client secret, storage credential, or sensitive URL.
+
+**Likely cause**
+
+- A raw response or temporary request was copied into evidence.
+- A new credential field is not covered by the expected redaction path.
+- A local credential file was included in a package.
+
+**Checks**
+
+Stop publication. Identify the affected file without printing the value. Check whether it is:
+
+- a phase environment;
+- a sensitive/secret-named artifact;
+- a raw request body;
+- a local credential file;
+- an unredacted JSON field.
+
+**Corrective action**
+
+Remove the artifact from any package or shared location, rotate the credential if disclosure occurred, correct the generation/redaction process, and regenerate evidence. Do not hand-edit a leaked public package and assume the secret is safe.
+
+See [Evidence and traceability](evidence-and-traceability.md) and [Authentication](authentication.md).
+
+### Issue: `latest.json` does not identify the intended run
+
+**Symptom**
+
+The current convenience download contains data from a newer execution than expected.
+
+**Likely cause**
+
+`latest.*` was updated by another successful phase 4 run.
+
+**Checks**
+
+Use the run-specific manifest and download:
 
 ```text
-flujos/ippcp/export_dataspace.sh
-flujos/ippcp/ingesta
-flujos/ippcp/consumo
+downloads/assets/${ASSET_ID}/${SUFFIX}.${ASSET_EXTENSION}
+downloads/manifests/${ASSET_ID}/${SUFFIX}.manifest.json
 ```
 
-Para histórico de pruebas usa:
+**Corrective action**
 
-```text
-flujos/test3/export_dataspace.sh
-flujos/test3/ingesta
-flujos/test3/consumo
-```
+Use asset ID, `SUFFIX`, run-specific paths, and manifest metadata for durable traceability. Do not use `latest.*` as a backend contract or historical identifier.
 
-No mezcles `test3` con `ippcp`.
+## Legacy and historical boundaries
+
+- `v1` is legacy-supported and not the recommended path.
+- B2/CSV/InesDataStore is preserved as delivered T1 baseline evidence; its `phase*b` procedures are not part of this active guide.
+- `test3`, flat pre-versioned flow paths, upstream JWT authentication, phase 3 inline download, and old workshop steps are historical or obsolete.
+
+Historical procedures are intentionally not repaired or merged here. Use [Evidence and traceability](evidence-and-traceability.md) for the T1–T4 classification.
+
+## Related documentation
+
+- [Getting Started](getting-started.md)
+- [Architecture](architecture.md)
+- [Authentication](authentication.md)
+- [Execution phases](execution-phases.md)
+- [Evidence and traceability](evidence-and-traceability.md)
