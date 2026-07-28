@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# phase3_transfer_edr.sh — Fase 3: transfer HttpData-PULL, EDR y consumo de datos (test3).
+# phase3_transfer_edr.sh — Fase 3: transfer HttpData-PULL y obtención de EDR.
 #
 # Requisitos: Bash 4.3+, curl, jq (ver scripts/scripts_README.md).
 #
@@ -9,6 +9,7 @@
 # Prerrequisito: phase2 OK (phase2_env.sh o SUFFIX+ASSET_ID+AGREEMENT_ID exportados).
 # Relanzar con transfer previo en la misma ejecución: PHASE3_FORCE=1
 # Continuar ejecución fallida (sin crear transfer nuevo): PHASE3_RESUME=1
+# Compat legacy: PHASE3_TRY_DATA_CONSUMPTION=1 intenta consumir datos en phase3.
 #
 # Uso:
 #   source runtime/env/latest/phase2_env.sh
@@ -82,6 +83,21 @@ _phase3_read_env_field() {
 _phase3_id_is_set() {
   local value="${1:-}"
   [[ -n "${value}" && "${value}" != "null" ]]
+}
+
+_phase3_edr_url_has_sensitive_params() {
+  local value="${1:-}"
+  local lower="${value,,}"
+
+  [[ "${lower}" =~ [\?\#\&]([^=]*)(access_token|token|bearer|auth|code|credential)([^=]*)= ]]
+}
+
+_phase3_safe_summary_edr_url() {
+  if _phase3_edr_url_has_sensitive_params "${EDR_URL:-}"; then
+    printf '%s' '<redacted-sensitive-edr-url>'
+  else
+    printf '%s' "${EDR_URL:-}"
+  fi
 }
 
 # Ejecuta un bloque jq definido como readonly en este script sin expansión bash de $variables jq.
@@ -313,7 +329,9 @@ readonly _PHASE3_JQ_REDACT_EDR='
   def redact:
     if type == "object" then
       with_entries(
-        if key_should_redact(.key) then
+        if (.key | ascii_downcase | endswith("header:x-api-key")) then
+          .value = "<redacted>"
+        elif key_should_redact(.key) then
           .value = "***REDACTED***"
         elif (.value | type) == "object" or (.value | type) == "array" then
           .value |= redact
@@ -1078,6 +1096,11 @@ fi
 PHASE3_STEP="edr_obtained"
 _phase3_obtain_edr
 [[ -n "${EDR_URL:-}" && "${EDR_URL}" != "null" ]] || lib_die "EDR_URL no quedó disponible tras _phase3_obtain_edr"
+PHASE3_EDR_URL_SENSITIVE=0
+if _phase3_edr_url_has_sensitive_params "${EDR_URL}"; then
+  PHASE3_EDR_URL_SENSITIVE=1
+  lib_log WARN "EDR_URL contiene parámetros sensibles; no se persistirá en claro en phase3_env.sh ni summary.json"
+fi
 if ! _phase3_id_is_set "${PHASE3_EDR_AUTHORIZATION:-}" \
   && ! { _phase3_id_is_set "${PHASE3_EDR_AUTH_KEY:-}" && _phase3_id_is_set "${PHASE3_EDR_AUTH_CODE:-}"; }; then
   lib_die "No quedaron credenciales EDR disponibles tras _phase3_obtain_edr"
@@ -1087,52 +1110,73 @@ fi
 _phase3_cleanup
 
 lib_write_summary 3 edr_obtained ok \
-  "{\"http\":${PHASE3_EDR_HTTP},\"transfer_id\":\"${TRANSFER_ID}\",\"edr_url\":\"${EDR_URL}\",\"source\":\"${PHASE3_EDR_SOURCE}\",\"artifact\":\"phase3/30_edr_dataaddress_redacted.json\"}"
+  "$(jq -nc \
+    --argjson http "${PHASE3_EDR_HTTP}" \
+    --arg transfer_id "${TRANSFER_ID}" \
+    --arg edr_url "$(_phase3_safe_summary_edr_url)" \
+    --arg source "${PHASE3_EDR_SOURCE}" \
+    --arg artifact "phase3/30_edr_dataaddress_redacted.json" \
+    --argjson edr_url_redacted "${PHASE3_EDR_URL_SENSITIVE}" \
+    '{http: $http, transfer_id: $transfer_id, edr_url: $edr_url, source: $source, artifact: $artifact, edr_url_redacted: ($edr_url_redacted == 1)}')"
 
 export EDR_URL
 
 # ---------------------------------------------------------------------------
-# D. Consumir endpoint final
+# D. Consumir endpoint final (legacy explícito)
 # ---------------------------------------------------------------------------
 
-PHASE3_STEP="data_consumed"
-_phase3_consume_data_with_auth_candidates
+if [[ "${PHASE3_TRY_DATA_CONSUMPTION:-0}" == "1" ]]; then
+  PHASE3_STEP="data_consumed"
+  _phase3_consume_data_with_auth_candidates
 
-data_http="$(tr -d '\n\r' < "${PHASE3_DIR}/40_data_response.http")"
-data_bytes="$(_phase3_file_bytes "${PHASE3_DATA_RESPONSE_FILE}")"
-data_response_rel="phase3/$(_phase3_data_response_basename)"
+  data_http="$(tr -d '\n\r' < "${PHASE3_DIR}/40_data_response.http")"
+  data_bytes="$(_phase3_file_bytes "${PHASE3_DATA_RESPONSE_FILE}")"
+  data_response_rel="phase3/$(_phase3_data_response_basename)"
 
-lib_write_summary 3 data_consumed ok \
-  "$(jq -nc \
-    --argjson http "${data_http}" \
-    --arg auth_candidate_label "${PHASE3_AUTH_CANDIDATE_LABEL}" \
-    --arg asset_content_kind "${ASSET_CONTENT_KIND}" \
-    --arg asset_extension "${ASSET_EXTENSION}" \
-    --arg asset_media_type "${ASSET_MEDIA_TYPE}" \
-    --arg data_response_file "${data_response_rel}" \
-    --argjson bytes "${data_bytes}" \
-    --arg attempts_artifact "phase3/42_data_attempts_summary.json" \
-    --arg preview_artifact "phase3/41_data_preview.json" \
-    '{
-      http: $http,
-      auth_candidate_label: $auth_candidate_label,
-      asset_content_kind: $asset_content_kind,
-      asset_extension: $asset_extension,
-      asset_media_type: $asset_media_type,
-      data_response_file: $data_response_file,
-      bytes: $bytes,
-      attempts_artifact: $attempts_artifact,
-      preview_artifact: $preview_artifact
-    }')"
+  lib_write_summary 3 data_consumed ok \
+    "$(jq -nc \
+      --argjson http "${data_http}" \
+      --arg auth_candidate_label "${PHASE3_AUTH_CANDIDATE_LABEL}" \
+      --arg asset_content_kind "${ASSET_CONTENT_KIND}" \
+      --arg asset_extension "${ASSET_EXTENSION}" \
+      --arg asset_media_type "${ASSET_MEDIA_TYPE}" \
+      --arg data_response_file "${data_response_rel}" \
+      --argjson bytes "${data_bytes}" \
+      --arg attempts_artifact "phase3/42_data_attempts_summary.json" \
+      --arg preview_artifact "phase3/41_data_preview.json" \
+      '{
+        http: $http,
+        auth_candidate_label: $auth_candidate_label,
+        asset_content_kind: $asset_content_kind,
+        asset_extension: $asset_extension,
+        asset_media_type: $asset_media_type,
+        data_response_file: $data_response_file,
+        bytes: $bytes,
+        attempts_artifact: $attempts_artifact,
+        preview_artifact: $preview_artifact,
+        legacy_phase3_consumption: true
+      }')"
+else
+  lib_write_summary 3 data_consumed skipped \
+    '{"reason":"phase3 termina en transfer + EDR; phase4_save_download.sh realiza la descarga","legacy_flag":"PHASE3_TRY_DATA_CONSUMPTION=1"}'
+fi
 
 # ---------------------------------------------------------------------------
 # E. Cierre
 # ---------------------------------------------------------------------------
 
 PHASE3_STEP="export_env"
-lib_export_phase_env 3
+if (( PHASE3_EDR_URL_SENSITIVE == 1 )); then
+  _phase3_sensitive_edr_url="${EDR_URL}"
+  unset EDR_URL
+  lib_export_phase_env 3
+  EDR_URL="${_phase3_sensitive_edr_url}"
+  export EDR_URL
+else
+  lib_export_phase_env 3
+fi
 lib_set_phase_status 3 ok
 
 trap - ERR
 _phase3_cleanup
-lib_log INFO "Fase 3 OK — SUFFIX=${SUFFIX} TRANSFER_ID=${TRANSFER_ID} EDR_URL=${EDR_URL}"
+lib_log INFO "Fase 3 OK — SUFFIX=${SUFFIX} TRANSFER_ID=${TRANSFER_ID} EDR_URL=$(_phase3_safe_summary_edr_url)"

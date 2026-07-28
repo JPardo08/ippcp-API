@@ -21,20 +21,85 @@ from evidence_common import (
     EvidenceRunLoader,
     FileEntry,
     FileIndexer,
+    MINIMAL_PUBLICATION_PROFILE,
     NOT_FOUND,
+    PublicationScanner,
     SecretScanner,
     SummaryParser,
+    T4PublicationModel,
     build_test_specs,
     compute_sha256,
+    extract_t4_publication_model,
     find_repo_root,
     load_test_config,
+    parse_only_tests,
     parse_tests_override,
     relative_to_repo,
     resolve_repo_path,
+    validate_allowlisted_json,
 )
 
 
 PACKAGE_ROOT = "ippcp_evidence_package"
+MINIMAL_PUBLICATION_FILES = {
+    "sanitized_summary.json",
+    "sanitized_manifest.json",
+    "validation_status.json",
+}
+MINIMAL_PUBLICATION_JSON_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "sanitized_summary.json": {
+        "schema_version": None,
+        "test_id": None,
+        "flow_type": None,
+        "asset_type": None,
+        "evidence_role": None,
+        "technical_topology": {
+            "technical_provider_connector": None,
+            "technical_consumer_connector": None,
+        },
+        "execution_identifiers": {
+            "run_id": None,
+            "asset_id": None,
+            "contract_definition_id": None,
+            "negotiation_id": None,
+            "agreement_id": None,
+            "transfer_process_id": None,
+        },
+        "phases": {
+            "phase0": {"status": None},
+            "phase1": {"status": None},
+            "phase2": {"status": None},
+            "phase3": {"status": None},
+            "phase4": {"status": None},
+        },
+    },
+    "sanitized_manifest.json": {
+        "schema_version": None,
+        "artifact_type": None,
+        "download": {
+            "status": None,
+            "byte_count": None,
+            "sha256_algorithm": None,
+            "sha256_verified": None,
+            "sha256_value": None,
+            "payload_included": None,
+        },
+    },
+    "validation_status.json": {
+        "schema_version": None,
+        "semantic_validation": {
+            "status": None,
+            "source": None,
+        },
+        "publication_checks": {
+            "payload_excluded": None,
+            "phase_environment_excluded": None,
+            "raw_requests_responses_excluded": None,
+            "identifiers_replaced": None,
+            "hash_value_withheld": None,
+        },
+    },
+}
 MANIFEST_FIELDS = [
     "test_id",
     "suffix",
@@ -53,6 +118,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, help="YAML/JSON config with tests")
     parser.add_argument("--tests", help="Override tests as T1=SUFFIX,T2=SUFFIX")
+    parser.add_argument("--only-tests", help="Select only these configured test IDs, comma-separated")
     parser.add_argument("--excel", help="Optional Excel report to include")
     parser.add_argument("--output", help="Output .zip path")
     parser.add_argument("--export-dir", help="Base directory for timestamped exports")
@@ -261,6 +327,93 @@ def stage_external_file(
     )
 
 
+def build_minimal_publication_documents(
+    model: T4PublicationModel,
+) -> Dict[str, Dict[str, Any]]:
+    """Project the neutral T4 model into the package JSON contract."""
+    return {
+        "sanitized_summary.json": {
+            "schema_version": "1.0",
+            "test_id": model.test_id,
+            "flow_type": model.flow_type,
+            "asset_type": model.asset_type,
+            "evidence_role": model.evidence_role,
+            "technical_topology": {
+                "technical_provider_connector": model.technical_provider_connector,
+                "technical_consumer_connector": model.technical_consumer_connector,
+            },
+            "execution_identifiers": dict(model.execution_identifiers),
+            "phases": {
+                phase: {"status": model.phase_statuses[phase]}
+                for phase in ("phase0", "phase1", "phase2", "phase3", "phase4")
+            },
+        },
+        "sanitized_manifest.json": {
+            "schema_version": "1.0",
+            "artifact_type": "sanitized-download-manifest",
+            "download": {
+                "status": model.download_status,
+                "byte_count": model.byte_count,
+                "sha256_algorithm": model.sha256_algorithm,
+                "sha256_verified": model.sha256_verified,
+                "sha256_value": model.sha256_value,
+                "payload_included": model.payload_included,
+            },
+        },
+        "validation_status.json": {
+            "schema_version": "1.0",
+            "semantic_validation": {
+                "status": model.semantic_validation_status,
+                "source": model.semantic_validation_source,
+            },
+            "publication_checks": {
+                "payload_excluded": not model.payload_included,
+                "phase_environment_excluded": True,
+                "raw_requests_responses_excluded": True,
+                "identifiers_replaced": True,
+                "hash_value_withheld": True,
+            },
+        },
+    }
+
+
+def stage_minimal_publication(
+    rows: List[Dict[str, Any]],
+    loader: EvidenceRunLoader,
+    spec,
+    staging_root: Path,
+) -> None:
+    model = extract_t4_publication_model(loader, spec)
+    documents = build_minimal_publication_documents(model)
+    if set(documents) != MINIMAL_PUBLICATION_FILES:
+        raise RuntimeError("minimal publication documents differ from the archive allowlist")
+
+    for file_name in sorted(documents):
+        data = documents[file_name]
+        schema_findings = validate_allowlisted_json(data, MINIMAL_PUBLICATION_JSON_SCHEMAS[file_name])
+        if schema_findings:
+            raise RuntimeError(f"{spec.test_id} {file_name} violates field allowlist: {schema_findings}")
+        text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+        publication_findings = PublicationScanner.findings(text)
+        if publication_findings:
+            raise RuntimeError(f"{spec.test_id} {file_name} violates publication policy: {publication_findings}")
+        dest = staging_root / spec.sheet_name / file_name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(text, encoding="utf-8")
+        add_manifest_row(
+            rows,
+            test_id=spec.test_id,
+            suffix="<run-id>",
+            source_path="",
+            zip_path=f"{PACKAGE_ROOT}/{spec.sheet_name}/{file_name}",
+            category="publication_metadata",
+            size_bytes=dest.stat().st_size,
+            sha256=compute_sha256(dest),
+            sanitized=True,
+            included=True,
+        )
+
+
 def stage_excel(
     rows: List[Dict[str, Any]],
     excel_path: Path,
@@ -306,24 +459,41 @@ def stage_excel(
 
 
 def write_package_readme(staging_root: Path, config: Dict[str, Any], specs, sanitize_connectors: bool) -> Path:
+    minimal_only = bool(specs) and all(spec.publication_profile == MINIMAL_PUBLICATION_PROFILE for spec in specs)
+    if minimal_only:
+        contents = [
+            "- Per-test sanitized summary, manifest metadata, and validation status.",
+            "- package_manifest.json and package_manifest.csv list the allowlisted files.",
+            "- No raw phase artifact, phase environment, source path, or downloaded payload is included.",
+        ]
+    else:
+        contents = [
+            "- Excel summary report, when provided with --excel.",
+            "- Per-test evidence folders with summary.json, non-sensitive JSON artifacts, .http files, and download manifests.",
+            "- package_manifest.json and package_manifest.csv list included and excluded files.",
+        ]
     lines = [
         "IPPCP Evidence Package",
         f"Generated at: {datetime.now().isoformat(timespec='seconds')}",
         "",
         "Contents:",
-        "- Excel summary report, when provided with --excel.",
-        "- Per-test evidence folders with summary.json, non-sensitive JSON artifacts, .http files, and download manifests.",
-        "- package_manifest.json and package_manifest.csv list included and excluded files.",
+        *contents,
         "",
         "Tests included:",
     ]
     for spec in specs:
-        provider = spec.provider_connector
-        consumer = spec.consumer_connector
+        if spec.publication_profile == MINIMAL_PUBLICATION_PROFILE:
+            provider = spec.technical_provider_connector
+            consumer = spec.technical_consumer_connector
+            suffix = "<run-id>"
+        else:
+            provider = spec.provider_connector
+            consumer = spec.consumer_connector
+            suffix = spec.suffix
         if sanitize_connectors:
             provider = ConnectorSanitizer.apply(provider, config.get("connector_aliases"), False)
             consumer = ConnectorSanitizer.apply(consumer, config.get("connector_aliases"), False)
-        lines.append(f"- {spec.test_id}: workflow={spec.workflow}, suffix={spec.suffix}, provider={provider}, consumer={consumer}")
+        lines.append(f"- {spec.test_id}: workflow={spec.workflow}, suffix={suffix}, provider={provider}, consumer={consumer}")
     lines.extend(
         [
             "",
@@ -390,6 +560,70 @@ def audit_zip(zip_path: Path, sanitize_connectors: bool) -> List[str]:
     return findings
 
 
+def minimal_publication_archive_allowlist(spec) -> set[str]:
+    entries = {
+        f"{PACKAGE_ROOT}/{spec.sheet_name}/{file_name}"
+        for file_name in MINIMAL_PUBLICATION_FILES
+    }
+    entries.update(
+        {
+            f"{PACKAGE_ROOT}/README_PACKAGE.txt",
+            f"{PACKAGE_ROOT}/package_manifest.json",
+            f"{PACKAGE_ROOT}/package_manifest.csv",
+        }
+    )
+    return entries
+
+
+def audit_minimal_publication_zip(zip_path: Path, spec) -> List[str]:
+    findings: List[str] = []
+    allowed_entries = minimal_publication_archive_allowlist(spec)
+    with zipfile.ZipFile(zip_path) as archive:
+        actual_entries = {info.filename for info in archive.infolist() if not info.is_dir()}
+        for name in sorted(actual_entries - allowed_entries):
+            findings.append(f"unknown archive entry: {name}")
+        for name in sorted(allowed_entries - actual_entries):
+            findings.append(f"missing archive entry: {name}")
+
+        for name in sorted(actual_entries):
+            data = archive.read(name)
+            text = data.decode("utf-8", errors="ignore")
+            for finding in PublicationScanner.findings(text):
+                findings.append(f"{finding} in {name}")
+
+            if name.endswith(".json"):
+                try:
+                    parsed = json.loads(text)
+                except json.JSONDecodeError:
+                    findings.append(f"invalid JSON in {name}")
+                    continue
+                file_name = Path(name).name
+                if file_name in MINIMAL_PUBLICATION_JSON_SCHEMAS:
+                    for finding in validate_allowlisted_json(
+                        parsed, MINIMAL_PUBLICATION_JSON_SCHEMAS[file_name]
+                    ):
+                        findings.append(f"{finding} in {name}")
+                elif file_name == "package_manifest.json":
+                    if not isinstance(parsed, list):
+                        findings.append(f"package manifest is not a list in {name}")
+                    else:
+                        for index, row in enumerate(parsed):
+                            if not isinstance(row, dict):
+                                findings.append(f"package manifest row {index} is not an object")
+                                continue
+                            unknown = set(row) - set(MANIFEST_FIELDS)
+                            missing = set(MANIFEST_FIELDS) - set(row)
+                            if unknown:
+                                findings.append(f"package manifest row {index} unknown fields: {sorted(unknown)}")
+                            if missing:
+                                findings.append(f"package manifest row {index} missing fields: {sorted(missing)}")
+                            if row.get("source_path"):
+                                findings.append(f"source path present in package manifest row {index}")
+                            if row.get("suffix") not in {"", "<run-id>"}:
+                                findings.append(f"real suffix present in package manifest row {index}")
+    return findings
+
+
 def print_dry_run(rows: List[Dict[str, Any]]) -> None:
     for row in rows:
         marker = "INCLUDE" if row.get("included") else "EXCLUDE"
@@ -420,15 +654,40 @@ def main() -> int:
     args = parse_args()
     repo_root = Path(args.repo_root).resolve() if args.repo_root else find_repo_root(Path(__file__).resolve())
     config = load_test_config(resolve_repo_path(repo_root, args.config))
-    specs = build_test_specs(config, parse_tests_override(args.tests))
+    only_tests = parse_only_tests(args.only_tests)
+    specs = build_test_specs(config, parse_tests_override(args.tests), only_tests)
     defaults = config.get("defaults") or {}
     evidence_dir = resolve_repo_path(repo_root, defaults.get("evidence_dir") or "evidencias/runs")
     downloads_dir = resolve_repo_path(repo_root, defaults.get("downloads_dir") or "downloads")
     warnings: List[str] = []
 
     if not specs:
-        print("ERROR: no tests configured", file=sys.stderr)
+        if only_tests:
+            print(
+                "ERROR: selected tests have no configured or runtime suffix; "
+                "supply --tests TEST_ID=SUFFIX",
+                file=sys.stderr,
+            )
+        else:
+            print("ERROR: no tests configured", file=sys.stderr)
         return 1
+    minimal_specs = [spec for spec in specs if spec.publication_profile == MINIMAL_PUBLICATION_PROFILE]
+    minimal_only = len(minimal_specs) == len(specs)
+    if minimal_specs and not minimal_only:
+        message = (
+            "minimal_publication T4 is mixed with delivery profiles; "
+            "use --only-tests T4 for a publication-ready T4 package"
+        )
+        warnings.append(message)
+        print(f"WARN: {message}", file=sys.stderr)
+    if minimal_specs and args.include_downloaded_assets:
+        message = "downloaded assets are forbidden for minimal_publication and will not be staged for T4"
+        warnings.append(message)
+        print(f"WARN: {message}", file=sys.stderr)
+    if minimal_specs and args.excel:
+        message = "Excel inclusion is disabled for minimal_publication"
+        warnings.append(message)
+        print(f"WARN: {message}", file=sys.stderr)
     for spec in specs:
         for message in ConnectorSanitizer.validate_workflow_roles(spec, config):
             warnings.append(message)
@@ -446,8 +705,21 @@ def main() -> int:
                 message = f"{spec.test_id}: missing run summary at {loader.summary_path}"
                 warnings.append(message)
                 print(f"WARN: {message}", file=sys.stderr)
-                add_manifest_row(rows, test_id=spec.test_id, suffix=spec.suffix, source_path=relative_to_repo(repo_root, loader.summary_path), category="evidence", included=False, exclusion_reason="missing_run")
+                add_manifest_row(
+                    rows,
+                    test_id=spec.test_id,
+                    suffix="<run-id>" if spec.publication_profile == MINIMAL_PUBLICATION_PROFILE else spec.suffix,
+                    source_path="" if spec.publication_profile == MINIMAL_PUBLICATION_PROFILE else relative_to_repo(repo_root, loader.summary_path),
+                    category="evidence",
+                    included=False,
+                    exclusion_reason="missing_run",
+                )
                 continue
+            if spec.publication_profile == MINIMAL_PUBLICATION_PROFILE:
+                loader.load(include_env=False)
+                stage_minimal_publication(rows, loader, spec, staging_root)
+                continue
+
             loader.load()
             parser = loader.parser or SummaryParser(loader.summary)
             entries = indexer.collect(loader.run_dir, spec, parser)
@@ -486,7 +758,7 @@ def main() -> int:
                         redact_local_paths=False,
                     )
 
-        if args.excel:
+        if args.excel and not minimal_specs:
             excel_path = resolve_repo_path(repo_root, args.excel)
             if excel_path.exists():
                 stage_excel(rows, excel_path, staging_root, repo_root, config, args.sanitize_connectors, args.redact_local_paths)
@@ -498,7 +770,7 @@ def main() -> int:
         add_manifest_row(
             rows,
             test_id="_package",
-            source_path="generated",
+            source_path="" if minimal_only else "generated",
             zip_path=f"{PACKAGE_ROOT}/README_PACKAGE.txt",
             category="readme",
             size_bytes=readme_path.stat().st_size,
@@ -512,7 +784,7 @@ def main() -> int:
             add_manifest_row(
                 rows,
                 test_id="_package",
-                source_path="generated",
+                source_path="" if minimal_only else "generated",
                 zip_path=f"{PACKAGE_ROOT}/{name}",
                 category="package_meta",
                 size_bytes="",
@@ -531,8 +803,18 @@ def main() -> int:
         if not output:
             print("ERROR: --output or --export-dir is required unless --dry-run is used", file=sys.stderr)
             return 1
+        if minimal_specs and any(spec.suffix in output.name for spec in minimal_specs):
+            if output.exists():
+                output.unlink()
+            print(
+                "ERROR: runtime T4 suffix appears in output filename",
+                file=sys.stderr,
+            )
+            return 1
         create_zip(staging_root, output)
         audit_findings = audit_zip(output, args.sanitize_connectors)
+        if minimal_only:
+            audit_findings.extend(audit_minimal_publication_zip(output, minimal_specs[0]))
         for finding in audit_findings:
             print(f"WARN: audit: {finding}", file=sys.stderr)
         print(f"ZIP written: {relative_to_repo(repo_root, output)}")

@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.0",
+  "test_id": "T4",
+  "flow_type": "ingestion-api-v2",
+  "asset_type": "HttpData-PULL",
+  "evidence_role": "additional_validation",
+  "technical_topology": {
+    "technical_provider_connector": "CONN-CITYCOUNCIL",
+    "technical_consumer_connector": "CONN-COMPANY"
+  },
+  "execution_identifiers": {
+    "run_id": "<run-id>",
+    "asset_id": "<asset-id>",
+    "contract_definition_id": "<contract-definition-id>",
+    "negotiation_id": "<negotiation-id>",
+    "agreement_id": "<agreement-id>",
+    "transfer_process_id": "<transfer-process-id>"
+  },
+  "phases": {
+    "phase0": {
+      "status": "ok"
+    },
+    "phase1": {
+      "status": "ok"
+    },
+    "phase2": {
+      "status": "ok"
+    },
+    "phase3": {
+      "status": "ok"
+    },
+    "phase4": {
+      "status": "ok"
+    }
+  }
+}

@@ -10,6 +10,7 @@
 #   /opt/homebrew/bin/bash scripts/phase1_provider_publish.sh
 
 set -euo pipefail
+[[ $- != *x* ]] || set +x
 
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib_common.sh
@@ -17,11 +18,22 @@ source "${_SCRIPT_DIR}/lib_common.sh"
 
 readonly REQUEST_LIST_BODY='{"@context":{"@vocab":"https://w3id.org/edc/v0.0.1/ns/"},"offset":0,"limit":50,"filterExpression":[]}'
 readonly VOCAB_LIST_BODY='{}'
+readonly PHASE1_PROVIDER_ID_HEADER_KEY='header:X-Provider-Id'
+readonly PHASE1_API_KEY_HEADER_KEY='header:X-Api-Key'
 
 PHASE1_STEP="init"
+PHASE1_SENSITIVE_TMP_DIR=""
+
+_phase1_cleanup() {
+  if [[ -n "${PHASE1_SENSITIVE_TMP_DIR}" && -d "${PHASE1_SENSITIVE_TMP_DIR}" ]]; then
+    rm -rf "${PHASE1_SENSITIVE_TMP_DIR}"
+    PHASE1_SENSITIVE_TMP_DIR=""
+  fi
+}
 
 _phase1_on_err() {
   local rc=$?
+  _phase1_cleanup
   if [[ -n "${RUN_DIR:-}" && -d "${RUN_DIR}" ]]; then
     lib_write_summary 1 "${PHASE1_STEP}" fail "{\"exit_code\":${rc}}" 2>/dev/null || true
     lib_set_phase_status 1 fail 2>/dev/null || true
@@ -29,12 +41,96 @@ _phase1_on_err() {
   exit "${rc}"
 }
 trap _phase1_on_err ERR
+trap _phase1_cleanup EXIT
 
 _phase1_write_json() {
   local dest="$1"
   local tmp="${dest}.$$"
   cat > "${tmp}"
   mv "${tmp}" "${dest}"
+}
+
+_phase1_ensure_sensitive_tmp_dir() {
+  if [[ -z "${PHASE1_SENSITIVE_TMP_DIR}" || ! -d "${PHASE1_SENSITIVE_TMP_DIR}" ]]; then
+    PHASE1_SENSITIVE_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/phase1-sensitive.XXXXXX")"
+    chmod 700 "${PHASE1_SENSITIVE_TMP_DIR}"
+  fi
+}
+
+_phase1_redact_json_file() {
+  local source_file="$1"
+  local dest_file="$2"
+  local tmp="${dest_file}.$$"
+
+  jq '
+    def redact:
+      if type == "object" then
+        with_entries(
+          if (.key | ascii_downcase | endswith("header:x-api-key")) then
+            .value = "<redacted>"
+          elif (.value | type) == "object" or (.value | type) == "array" then
+            .value |= redact
+          else
+            .
+          end
+        )
+      elif type == "array" then map(redact)
+      else .
+      end;
+    redact
+  ' "${source_file}" > "${tmp}"
+  mv "${tmp}" "${dest_file}"
+}
+
+_phase1_assert_no_sensitive_artifact() {
+  local file="$1"
+  [[ -f "${file}" ]] || return 0
+
+  if awk '/Authorization|Bearer |access_token|INGESTA_API_BEARER_TOKEN|client_secret/ { found = 1; exit } END { exit found ? 0 : 1 }' "${file}"; then
+    lib_die "Artefacto phase1 contiene material sensible o header Authorization: ${file}"
+  fi
+
+  if [[ -n "${INGESTA_API_KEY:-}" ]] \
+    && printf '%s\n' "${INGESTA_API_KEY}" | grep -Fq -f - "${file}"; then
+    lib_die "Artefacto phase1 contiene INGESTA_API_KEY sin redactar: ${file}"
+  fi
+
+  if [[ "${file}" == *.json ]] && jq -e '
+    . as $root
+    | any(paths(scalars) as $p;
+        (($p[-1] | tostring | ascii_downcase | endswith("header:x-api-key")))
+        and (($root | getpath($p)) != "<redacted>"))
+  ' "${file}" >/dev/null 2>&1; then
+    lib_die "Artefacto phase1 contiene header:X-Api-Key sin <redacted>: ${file}"
+  fi
+}
+
+_phase1_curl_json_redacted() {
+  local artifact_base="$1"
+  shift
+
+  _phase1_ensure_sensitive_tmp_dir
+  local raw_base="${PHASE1_SENSITIVE_TMP_DIR}/$(basename "${artifact_base}")"
+  local rc=0
+
+  if lib_curl_json "${raw_base}" "$@"; then
+    rc=0
+  else
+    rc=$?
+  fi
+
+  if [[ -f "${raw_base}.http" ]]; then
+    cp "${raw_base}.http" "${artifact_base}.http"
+  fi
+
+  if [[ -s "${raw_base}.json" ]] && jq empty "${raw_base}.json" >/dev/null 2>&1; then
+    _phase1_redact_json_file "${raw_base}.json" "${artifact_base}.json"
+  else
+    jq -n '{error: "non_json_response_redacted"}' > "${artifact_base}.json"
+  fi
+
+  _phase1_assert_no_sensitive_artifact "${artifact_base}.json"
+  return "${rc}"
 }
 
 _phase1_list_and_summary() {
@@ -44,11 +140,19 @@ _phase1_list_and_summary() {
   local body="${4:-${REQUEST_LIST_BODY}}"
 
   PHASE1_STEP="${step_id}"
-  lib_curl_json "${PHASE1_DIR}/${base}" \
-    -X POST "${PROVIDER_BASE}${ENDPOINTS[${endpoint_key}]}" \
-    -H "Authorization: Bearer ${PROVIDER_JWT}" \
-    -H "Content-Type: application/json" \
-    -d "${body}"
+  if [[ "${endpoint_key}" == "asset" ]]; then
+    _phase1_curl_json_redacted "${PHASE1_DIR}/${base}" \
+      -X POST "${PROVIDER_BASE}${ENDPOINTS[${endpoint_key}]}" \
+      -H "Authorization: Bearer ${PROVIDER_JWT}" \
+      -H "Content-Type: application/json" \
+      -d "${body}"
+  else
+    lib_curl_json "${PHASE1_DIR}/${base}" \
+      -X POST "${PROVIDER_BASE}${ENDPOINTS[${endpoint_key}]}" \
+      -H "Authorization: Bearer ${PROVIDER_JWT}" \
+      -H "Content-Type: application/json" \
+      -d "${body}"
+  fi
 
   local http count
   http="$(tr -d '\n' < "${PHASE1_DIR}/${base}.http")"
@@ -80,11 +184,24 @@ _phase1_create_and_summary() {
   PHASE1_STEP="${step_id}"
   local http base_meta summary_meta
 
-  if ! lib_curl_json "${PHASE1_DIR}/${base}" \
+  local curl_ok=0
+  if [[ "${step_id}" == "create_asset" ]]; then
+    if _phase1_curl_json_redacted "${PHASE1_DIR}/${base}" \
+      -H "Authorization: Bearer ${PROVIDER_JWT}" \
+      -H "Content-Type: application/json" \
+      -d "@${request_file}" \
+      "$@"; then
+      curl_ok=1
+    fi
+  elif lib_curl_json "${PHASE1_DIR}/${base}" \
     -H "Authorization: Bearer ${PROVIDER_JWT}" \
     -H "Content-Type: application/json" \
     -d "@${request_file}" \
     "$@"; then
+    curl_ok=1
+  fi
+
+  if (( curl_ok == 0 )); then
     http="$(tr -d '\n\r' < "${PHASE1_DIR}/${base}.http")"
     if [[ "${http}" == "409" ]]; then
       lib_die "HTTP 409: recurso ya existe (SUFFIX=${SUFFIX}, paso=${step_id}). Inicia una ejecución nueva o diseña cleanup."
@@ -357,6 +474,10 @@ _phase1_validate_asset_config() {
 
   jq -e '(.keywords // []) | type == "array" and all(.[]; type == "string")' "${config_file}" >/dev/null \
     || lib_die "ASSET_CONFIG: keywords debe ser un array de strings"
+  jq -e '(.requires_provider_id_header // false) | type == "boolean"' "${config_file}" >/dev/null \
+    || lib_die "ASSET_CONFIG: requires_provider_id_header debe ser booleano"
+  jq -e '(.requires_api_key_header // false) | type == "boolean"' "${config_file}" >/dev/null \
+    || lib_die "ASSET_CONFIG: requires_api_key_header debe ser booleano"
 
   local asset_type content_kind extension base_url
   asset_type="$(_phase1_jq_string "${config_file}" type)"
@@ -385,7 +506,21 @@ _phase1_set_legacy_asset_defaults() {
   export STORAGE_MODE="httpdata"
   ASSET_KEYWORDS_JSON='["taller","demo","dataspace"]'
   export ASSET_KEYWORDS_JSON
+  ASSET_REQUIRES_PROVIDER_ID_HEADER=0
+  ASSET_REQUIRES_API_KEY_HEADER=0
   unset ASSET_CONFIG ASSET_SLUG
+}
+
+_phase1_validate_provider_id_header_env() {
+  [[ -n "${INGESTA_API_PROVIDER_ID:-}" ]] \
+    || lib_die "INGESTA_API_PROVIDER_ID requerido porque ASSET_CONFIG declara requires_provider_id_header=true"
+  [[ "${INGESTA_API_PROVIDER_ID}" =~ ^[0-9]+$ ]] \
+    || lib_die "INGESTA_API_PROVIDER_ID debe ser numérico; no usar UUID de Keycloak."
+}
+
+_phase1_validate_api_key_header_env() {
+  [[ -n "${INGESTA_API_KEY:-}" ]] \
+    || lib_die "INGESTA_API_KEY requerida porque ASSET_CONFIG declara requires_api_key_header=true"
 }
 
 _phase1_load_asset_config() {
@@ -408,6 +543,7 @@ _phase1_load_asset_config() {
   _phase1_validate_asset_config "${config_path}"
 
   local raw_slug safe_slug config_asset_id media_type content_kind extension
+  local requires_provider_id_header requires_api_key_header
   raw_slug="$(_phase1_jq_string "${config_path}" asset_slug)"
   safe_slug="$(_phase1_sanitize_slug "${raw_slug}")"
   [[ -n "${safe_slug}" ]] || lib_die "ASSET_CONFIG: asset_slug inválido tras sanitizar"
@@ -426,6 +562,22 @@ _phase1_load_asset_config() {
   media_type="$(jq -r '.media_type // empty | select(type == "string" and length > 0)' "${config_path}")"
   if [[ -z "${media_type}" ]]; then
     media_type="$(_phase1_default_media_type "${extension}")"
+  fi
+
+  requires_provider_id_header="$(jq -r '.requires_provider_id_header // false' "${config_path}")"
+  if [[ "${requires_provider_id_header}" == "true" ]]; then
+    _phase1_validate_provider_id_header_env
+    ASSET_REQUIRES_PROVIDER_ID_HEADER=1
+  else
+    ASSET_REQUIRES_PROVIDER_ID_HEADER=0
+  fi
+
+  requires_api_key_header="$(jq -r '.requires_api_key_header // false' "${config_path}")"
+  if [[ "${requires_api_key_header}" == "true" ]]; then
+    _phase1_validate_api_key_header_env
+    ASSET_REQUIRES_API_KEY_HEADER=1
+  else
+    ASSET_REQUIRES_API_KEY_HEADER=0
   fi
 
   export ASSET_ID_CUSTOM=1
@@ -455,6 +607,8 @@ _phase1_write_asset_request() {
   lib_log INFO "ASSET_CONTENT_KIND=${ASSET_CONTENT_KIND}"
   lib_log INFO "ASSET_EXTENSION=${ASSET_EXTENSION}"
   lib_log INFO "ASSET_KEYWORDS_JSON=${ASSET_KEYWORDS_JSON}"
+  lib_log INFO "ASSET_REQUIRES_PROVIDER_ID_HEADER=${ASSET_REQUIRES_PROVIDER_ID_HEADER:-0}"
+  lib_log INFO "ASSET_REQUIRES_API_KEY_HEADER=${ASSET_REQUIRES_API_KEY_HEADER:-0}"
 
   jq -n \
     --arg id "${ASSET_ID}" \
@@ -466,6 +620,12 @@ _phase1_write_asset_request() {
     --arg asset_slug "${ASSET_SLUG:-}" \
     --arg base_url "${ASSET_BASE_URL}" \
     --arg data_address_name "${ASSET_DATA_ADDRESS_NAME}" \
+    --arg provider_id_header_key "${PHASE1_PROVIDER_ID_HEADER_KEY}" \
+    --arg provider_id "${INGESTA_API_PROVIDER_ID:-}" \
+    --arg requires_provider_id_header "${ASSET_REQUIRES_PROVIDER_ID_HEADER:-0}" \
+    --arg api_key_header_key "${PHASE1_API_KEY_HEADER_KEY}" \
+    --arg api_key "${INGESTA_API_KEY:-}" \
+    --arg requires_api_key_header "${ASSET_REQUIRES_API_KEY_HEADER:-0}" \
     --argjson keywords "${ASSET_KEYWORDS_JSON}" \
     '{
       "@context": {
@@ -486,11 +646,13 @@ _phase1_write_asset_request() {
         "dct:description": $description,
         "dcat:keyword": $keywords
       } + (if $asset_slug != "" then {assetSlug: $asset_slug} else {} end)),
-      "dataAddress": {
+      "dataAddress": ({
         type: "HttpData",
         baseUrl: $base_url,
         name: $data_address_name
       }
+      + (if $requires_provider_id_header == "1" then {($provider_id_header_key): $provider_id} else {} end)
+      + (if $requires_api_key_header == "1" then {($api_key_header_key): $api_key} else {} end))
     }' > "${tmp}"
 
   mv "${tmp}" "${dest}"
@@ -576,6 +738,8 @@ context_tmp="${context_file}.$$"
   _phase1_append_context_field ASSET_CONTENT_KIND "${ASSET_CONTENT_KIND:-}"
   _phase1_append_context_field ASSET_EXTENSION "${ASSET_EXTENSION:-}"
   _phase1_append_context_field ASSET_MEDIA_TYPE "${ASSET_MEDIA_TYPE:-}"
+  _phase1_append_context_field ASSET_REQUIRES_PROVIDER_ID_HEADER "${ASSET_REQUIRES_PROVIDER_ID_HEADER:-}"
+  _phase1_append_context_field ASSET_REQUIRES_API_KEY_HEADER "${ASSET_REQUIRES_API_KEY_HEADER:-}"
 } > "${context_tmp}"
 mv "${context_tmp}" "${context_file}"
 
@@ -662,7 +826,12 @@ _phase1_create_and_summary "12_create_contract_policy" "create_contract_policy" 
 
 PHASE1_STEP="create_asset"
 asset_request="${PHASE1_DIR}/13_create_asset_request.json"
-_phase1_write_asset_request "${asset_request}"
+_phase1_ensure_sensitive_tmp_dir
+asset_request_raw="${PHASE1_SENSITIVE_TMP_DIR}/13_create_asset_request.json"
+(umask 077; _phase1_write_asset_request "${asset_request_raw}")
+chmod 600 "${asset_request_raw}"
+_phase1_redact_json_file "${asset_request_raw}" "${asset_request}"
+_phase1_assert_no_sensitive_artifact "${asset_request}"
 
 create_asset_summary="$(
   jq -nc \
@@ -673,6 +842,10 @@ create_asset_summary="$(
     --arg extension "${ASSET_EXTENSION}" \
     --arg media_type "${ASSET_MEDIA_TYPE}" \
     --arg asset_config "${ASSET_CONFIG:-}" \
+    --arg requires_provider_id_header "${ASSET_REQUIRES_PROVIDER_ID_HEADER:-0}" \
+    --arg provider_id_header_key "${PHASE1_PROVIDER_ID_HEADER_KEY}" \
+    --arg requires_api_key_header "${ASSET_REQUIRES_API_KEY_HEADER:-0}" \
+    --arg api_key_header_key "${PHASE1_API_KEY_HEADER_KEY}" \
     '{
       asset_id: $asset_id,
       asset_slug: $asset_slug,
@@ -682,6 +855,8 @@ create_asset_summary="$(
       media_type: $media_type
     }
     + (if $asset_config != "" then {asset_config: $asset_config} else {} end)
+    + (if $requires_provider_id_header == "1" then {requires_provider_id_header: true, provider_id_header_key: $provider_id_header_key} else {} end)
+    + (if $requires_api_key_header == "1" then {requires_api_key_header: true, api_key_header_key: $api_key_header_key} else {} end)
     + (if $asset_slug != "" then {} else {legacy: true} end)'
 )"
 
@@ -689,15 +864,18 @@ if [[ -z "${create_asset_summary}" ]] || ! jq -e . >/dev/null 2>&1 <<< "${create
   lib_die "create_asset_summary inválido antes de create_asset"
 fi
 
-_phase1_create_and_summary "13_create_asset" "create_asset" "${asset_request}" "${create_asset_summary}" \
+_phase1_create_and_summary "13_create_asset" "create_asset" "${asset_request_raw}" "${create_asset_summary}" \
   -X POST "${PROVIDER_BASE}/management/v3/assets"
+_phase1_assert_no_sensitive_artifact "${asset_request}"
+_phase1_assert_no_sensitive_artifact "${PHASE1_DIR}/13_create_asset.json"
+_phase1_assert_no_sensitive_artifact "${RUN_DIR}/summary.json"
 
 # ---------------------------------------------------------------------------
 # Verificaciones post-creación
 # ---------------------------------------------------------------------------
 
 PHASE1_STEP="get_asset"
-if ! lib_curl_json "${PHASE1_DIR}/14_get_asset" \
+if ! _phase1_curl_json_redacted "${PHASE1_DIR}/14_get_asset" \
   -X GET "${PROVIDER_BASE}/management/v3/assets/${ASSET_ID}" \
   -H "Authorization: Bearer ${PROVIDER_JWT}"; then
   lib_die "GET asset ${ASSET_ID} falló"
@@ -705,6 +883,8 @@ fi
 get_asset_http="$(tr -d '\n' < "${PHASE1_DIR}/14_get_asset.http")"
 lib_write_summary 1 get_asset ok \
   "{\"http\":${get_asset_http},\"artifact\":\"phase1/14_get_asset\"}"
+_phase1_assert_no_sensitive_artifact "${PHASE1_DIR}/14_get_asset.json"
+_phase1_assert_no_sensitive_artifact "${RUN_DIR}/summary.json"
 
 PHASE1_STEP="create_contract_definition"
 cd_request="${PHASE1_DIR}/15_create_contract_definition_request.json"
@@ -757,7 +937,7 @@ _phase1_write_json "${catalog_request}" <<EOF
 }
 EOF
 
-lib_curl_json "${PHASE1_DIR}/17_self_catalog_request" \
+_phase1_curl_json_redacted "${PHASE1_DIR}/17_self_catalog_request" \
   -X POST "${PROVIDER_BASE}/management/v3/catalog/request" \
   -H "Authorization: Bearer ${PROVIDER_JWT}" \
   -H "Content-Type: application/json" \
@@ -774,6 +954,7 @@ selected_offer="${PHASE1_DIR}/selected_self_offer_policy.json"
 _phase1_extract_catalog_dataset \
   "${PHASE1_DIR}/17_self_catalog_request.json" \
   "${selected_dataset}"
+_phase1_assert_no_sensitive_artifact "${selected_dataset}"
 
 _phase1_extract_offer_policy "${selected_dataset}" "${selected_offer}"
 _phase1_validate_offer_policy "${selected_offer}"
@@ -796,7 +977,11 @@ _phase1_list_and_summary "24_final_vocabularies" "vocabulary" "final_vocabularie
 
 PHASE1_STEP="export_env"
 lib_export_phase_env 1
+_phase1_assert_no_sensitive_artifact "${RUN_DIR}/phase1_env.sh"
+_phase1_assert_no_sensitive_artifact "$(lib_phase_env_path 1)"
+_phase1_assert_no_sensitive_artifact "${RUN_DIR}/summary.json"
 lib_set_phase_status 1 ok
 
 trap - ERR
+_phase1_cleanup
 lib_log INFO "Fase 1 OK — SUFFIX=${SUFFIX} ASSET_ID=${ASSET_ID} CD_ID=${CD_ID}"

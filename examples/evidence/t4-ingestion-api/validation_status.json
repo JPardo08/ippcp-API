@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "semantic_validation": {
+    "status": "passed",
+    "source": "allowlisted-metadata"
+  },
+  "publication_checks": {
+    "payload_excluded": true,
+    "phase_environment_excluded": true,
+    "raw_requests_responses_excluded": true,
+    "identifiers_replaced": true,
+    "hash_value_withheld": true
+  }
+}
