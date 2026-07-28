@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Historical T1 B2/CSV reproducibility path; not current T4 ingestion.
 # phase4b_consumer_storage_fetch.sh — Fase B2: descarga desde MinIO consumer vía mc.
 #
 # Lee credenciales S3 de phase3b/21_transfer_final_state.sensitive.json (preferido).

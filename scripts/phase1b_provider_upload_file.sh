@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Historical T1 B2/CSV reproducibility path; not current T4 ingestion.
 # phase1b_provider_upload_file.sh — Fase B2: upload local → InesDataStore (provider).
 #
 # Requisitos: Bash 4.3+, curl, jq (ver scripts/scripts_README.md).

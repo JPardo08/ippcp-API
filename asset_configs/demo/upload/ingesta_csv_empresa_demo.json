@@ -2,7 +2,7 @@
   "storage_mode": "inesdatastore",
   "asset_slug": "ingesta_csv_empresa_demo",
   "name": "Ingesta CSV empresa demo",
-  "description": "CSV local de ingesta para validar upload a InesDataStore",
+  "description": "Legacy T1 B2/CSV reproducibility: CSV local de ingesta para validar upload a InesDataStore",
   "type": "InesDataStore",
   "local_file": "data/ingesta_demo.csv",
   "store_folder": "ippcp-ingesta",
