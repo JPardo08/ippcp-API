@@ -1,5 +1,13 @@
 # scripts/ — Automatización API IPPCP
 
+> **Referencia avanzada y de compatibilidad**
+>
+> Para una ejecución actual, comienza por [`README.md`](../README.md) y
+> [`docs/getting-started.md`](../docs/getting-started.md). `v2` es el camino
+> vigente. `v1` y los procedimientos B2/CSV se conservan para reproducibilidad
+> histórica; las secciones legacy de este documento no constituyen el quick
+> start recomendado.
+
 Librería compartida y scripts de fase para operar por API el EdD de IPPCP. La configuración operativa actual está en `flujos/ippcp/v2/`. `flujos/ippcp/v1/` se conserva exclusivamente como legado reproducible.
 
 Para IPPCP, `export_dataspace.sh` se resuelve desde la raíz del dataspace:

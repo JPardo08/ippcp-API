@@ -8,6 +8,12 @@ The current workflow publishes a provider asset, discovers it from a consumer co
 
 The implementation is currently operated through Bash phase scripts. A final backend API is not presented as implemented.
 
+## Public access and execution boundary
+
+This repository is public. Its documentation and automation may be reviewed and reused under the terms of the [Apache License 2.0](LICENSE).
+
+Running the validated flows requires network access to the configured connectors, provisioned technical users, local credentials, and valid configuration for both the environment and the selected upstream resource. These operational elements are not supplied by the public repository. Without them, the repository remains a technical and automation reference, not a standalone EdD environment, and access to the validated PRE profile must not be assumed.
+
 ## Architecture
 
 [![IPPCP logical architecture across city council and UPM infrastructures, provider and consumer connectors, and upstream data resources](docs/diagrams/ippcp-architecture.svg)](docs/diagrams/ippcp-architecture.svg)
@@ -54,10 +60,10 @@ Passwords, tokens, API keys, and EDR authorization must remain outside Git and p
 
 ## Quick start
 
-Clone the repository URL supplied by the project and enter its root:
+Clone the public repository and enter its root:
 
 ```bash
-git clone "<repository-url>" ippcp-API
+git clone https://github.com/JPardo08/ippcp-API.git
 cd ippcp-API
 ```
 
@@ -138,4 +144,4 @@ Use run-specific summaries and redacted artifacts for diagnosis. Do not reproduc
 
 This repository is developed in the context of the IPPCP project and its INESData data-space integration.
 
-Copyright and usage terms are defined exclusively by the current [LICENSE](LICENSE). No additional permission, endorsement, or redistribution right is implied by this README.
+The repository is licensed under the [Apache License 2.0](LICENSE), which defines the applicable permissions and conditions. Related project attribution is recorded separately in [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md); it does not modify the license.

@@ -1,0 +1,97 @@
+name: Validate repository
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tools/requirements-evidence-export.txt
+
+      - name: Install test dependencies
+        run: python -m pip install --requirement tools/requirements-evidence-export.txt
+
+      - name: Validate shell syntax
+        shell: bash
+        run: |
+          result=0
+          while IFS= read -r -d '' file; do
+            bash -n "${file}" || result=1
+          done < <(git ls-files -z -- '*.sh')
+          exit "${result}"
+
+      - name: Parse versioned JSON
+        run: |
+          python - <<'PY'
+          import json
+          import pathlib
+          import subprocess
+
+          files = subprocess.check_output(
+              ["git", "ls-files", "--", "*.json"], text=True
+          ).splitlines()
+          for filename in files:
+              with pathlib.Path(filename).open(encoding="utf-8") as stream:
+                  json.load(stream)
+          print(f"Validated {len(files)} JSON files")
+          PY
+
+      - name: Parse versioned YAML
+        run: |
+          python - <<'PY'
+          import pathlib
+          import subprocess
+
+          import yaml
+
+          files = subprocess.check_output(
+              ["git", "ls-files", "--", "*.yaml", "*.yml"], text=True
+          ).splitlines()
+          for filename in files:
+              with pathlib.Path(filename).open(encoding="utf-8") as stream:
+                  yaml.safe_load(stream)
+          print(f"Validated {len(files)} YAML files")
+          PY
+
+      - name: Validate Python syntax
+        run: |
+          python - <<'PY'
+          import ast
+          import pathlib
+          import subprocess
+
+          files = subprocess.check_output(
+              ["git", "ls-files", "--", "*.py"], text=True
+          ).splitlines()
+          for filename in files:
+              source = pathlib.Path(filename).read_text(encoding="utf-8")
+              ast.parse(source, filename=filename)
+          print(f"Validated {len(files)} Python files")
+          PY
+
+      - name: Run public unit tests
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest \
+            tools.tests.test_evidence_export \
+            tools.tests.test_dataspace_resolution \
+            -v
