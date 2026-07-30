@@ -30,7 +30,7 @@ Version status and evidence status are separate. A delivered evidence baseline d
 - `DEDICATED KEYCLOAK` is the municipal application Keycloak used by the City Council platform and external users. It is currently hosted temporarily in UPM infrastructure.
 - The municipal application Keycloak is separate from the EdD Keycloak that authenticates the provider and consumer connector users.
 - The dotted partitions separate functional phases and infrastructure domains.
-- `PHASE A` through `PHASE C` are business and use-case stages. They are distinct from the technical `phase0` through `phase4` script pipeline.
+- `WORKFLOW A` through `WORKFLOW C` are business and use-case stages. They are distinct from the technical `phase0` through `phase4` script pipeline.
 - The diagram is intentionally a high-level functional and infrastructure view, not an exhaustive low-level EDC sequence. Data Plane and EDR behavior, `X-Api-Key` and `X-Provider-Id`, `run_id`/`SUFFIX`, and evidence mechanics remain documented in [Authentication](authentication.md), [Execution phases](execution-phases.md), and [Evidence and traceability](evidence-and-traceability.md).
 
 ## Current logical actors
