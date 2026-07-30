@@ -13,12 +13,15 @@ The upstream operation is an HTTP `GET` request to the intake path. It has no re
 : "${INGESTA_API_KEY:?Load the provider-side API key securely}"
 : "${INGESTA_API_PROVIDER_ID:?Load the provider-side identifier securely}"
 
+output_file="data/real/ingesta/responses/pre/ingestion-response.json"
+mkdir -p "$(dirname "${output_file}")"
+
 curl --fail-with-body --silent --show-error --get \
   "${INGESTA_API_BASE_URL%/}/api/intake" \
   --header "Accept: application/json" \
   --header "X-Api-Key: ${INGESTA_API_KEY}" \
   --header "X-Provider-Id: ${INGESTA_API_PROVIDER_ID}" \
-  --output ingestion-response.json
+  --output "${output_file}"
 ```
 
 `X-Api-Key` and `X-Provider-Id` are header names. Their values remain provider-side operational data and are never published.
@@ -29,10 +32,10 @@ Inspect only the response shape, without printing records:
 jq '{
   response_type: type,
   record_count: (if type == "array" then length else null end)
-}' ingestion-response.json
+}' "${output_file}"
 ```
 
-The response file is controlled local output and must not enter Git or public evidence.
+The response file remains local, non-versioned output under a path covered by `.gitignore`; it must not enter Git or public evidence.
 
 ## T4 through the EdD data space
 

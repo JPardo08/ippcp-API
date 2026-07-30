@@ -150,28 +150,44 @@ export IPPCP_FLOW_VERSION=v2
 
 Then start a new phase 0. Use `ingesta` for Ingestion API and `consumo` for WFS or SPARQL.
 
-### Issue: execution falls back to historical `test3`
+### Issue: context is unresolved or historical `test3` is selected explicitly
 
 **Symptom**
 
-Context artifacts identify the `test3` dataspace or unexpected historical connectors.
+Phase 0 cannot resolve a dataspace, or context artifacts identify the historical `test3` dataspace or unexpected connectors.
 
 **Likely cause**
 
-`IPPCP_DATASPACE` was unset and the compatibility fallback was selected.
+No current context was selected, or the shell still contains historical selector variables. In particular, `IPPCP_DATASPACE=test3`, `IPPCP_DATASPACE_FILE`, `IPPCP_DATASPACE_DIR`, or `IPPCP_FLOW_DIR` may explicitly resolve an obsolete context.
+
+The current implementation does not fall back automatically to `test3`. With no resolvable context, it stops with an actionable error. A historical context is found only through an explicit, valid selection or override.
 
 **Checks**
 
 ```bash
 printf 'dataspace=%s\n' "${IPPCP_DATASPACE:-<unset>}"
+printf 'dataspace_dir=%s\n' "${IPPCP_DATASPACE_DIR:-<auto>}"
 printf 'dataspace_file=%s\n' "${IPPCP_DATASPACE_FILE:-<auto>}"
+printf 'flow_dir=%s\n' "${IPPCP_FLOW_DIR:-<auto>}"
+printf 'flow=%s\n' "${IPPCP_FLOW:-<unset>}"
+printf 'version=%s\n' "${IPPCP_FLOW_VERSION:-<unset>}"
 ```
 
 Inspect the phase 0 context for the current run without publishing it.
 
 **Corrective action**
 
-Stop the run. Explicitly set `IPPCP_DATASPACE=ippcp`, select `v2`, unset advanced directory/file overrides, and start a new execution. Do not continue a `test3` run as if it were current IPPCP.
+Stop the run and clear all historical selectors before choosing the current context:
+
+```bash
+unset IPPCP_DATASPACE IPPCP_DATASPACE_DIR IPPCP_DATASPACE_FILE
+unset IPPCP_FLOW_DIR IPPCP_FLOW IPPCP_FLOW_VERSION
+export IPPCP_DATASPACE=ippcp
+export IPPCP_FLOW="<ingesta-or-consumo>"
+export IPPCP_FLOW_VERSION=v2
+```
+
+Start a new phase 0 after making this selection. Do not continue an existing `test3` run as if it were current IPPCP.
 
 ### Issue: `runtime/env/latest` contains stale state
 

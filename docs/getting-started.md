@@ -39,10 +39,10 @@ The flow guides use `${BASH_BIN:-$(command -v bash)}` when `BASH_BIN` is not exp
 
 ## Clone the repository
 
-Use the repository URL supplied by the project:
+Clone the public repository:
 
 ```bash
-git clone "<repository-url>" ippcp-API
+git clone https://github.com/JPardo08/ippcp-API.git
 cd ippcp-API
 ```
 
