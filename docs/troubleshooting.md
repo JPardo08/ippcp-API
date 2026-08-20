@@ -934,10 +934,10 @@ Use asset ID, `SUFFIX`, run-specific paths, and manifest metadata for durable tr
 ## Legacy and historical boundaries
 
 - `v1` is legacy-supported and not the recommended path.
-- B2/CSV/InesDataStore is preserved as delivered T1 baseline evidence; its `phase*b` procedures are not part of this active guide.
+- B2/CSV/InesDataStore is preserved as delivered historical baseline evidence; its `phase*b` procedures are not part of this active guide.
 - `test3`, flat pre-versioned flow paths, upstream JWT authentication, phase 3 inline download, and old workshop steps are historical or obsolete.
 
-Historical procedures are intentionally not repaired or merged here. Use [Evidence and traceability](evidence-and-traceability.md) for the T1–T4 classification.
+Historical procedures are intentionally not repaired or merged here. Use [Evidence and traceability](evidence-and-traceability.md) for slot versus asset classification, and [`tools/tools_README.md`](../tools/tools_README.md) for exporter commands.
 
 ## Related documentation
 

@@ -208,7 +208,7 @@ Concrete validation identifiers and hashes remain internal unless explicitly san
 
 ### Delivered baseline
 
-- T1 B2/CSV/InesDataStore evidence is preserved as a delivered baseline. It is not replaced by the additional T4 Ingestion API validation.
+- B2/CSV/InesDataStore evidence is preserved as a delivered historical baseline. It is not replaced by the current Ingestion API v2 `HttpData-PULL` validation.
 
 ### Historical or obsolete
 

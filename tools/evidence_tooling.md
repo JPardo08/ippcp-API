@@ -1,4 +1,6 @@
-# Evidence tooling architecture (internal)
+# Evidence tooling architecture
+
+CLI entry point: [`tools_README.md`](tools_README.md). Traceability: [`../docs/evidence-and-traceability.md`](../docs/evidence-and-traceability.md). Sharing rules: [`../docs/evidence-publication.md`](../docs/evidence-publication.md).
 
 T1, T2, T3 and T4 are slot positions. The asset in each slot is classified from the run.
 
@@ -16,6 +18,7 @@ Historical/canonical runs are selected with an explicit preset. T* stay slots; a
 
 ```bash
 --preset legacy_assessment
+--preset legacy_test3
 ```
 
 `--profile` selects sanitization defaults only. It does not assign assets to slots.
@@ -34,6 +37,14 @@ Package status is derived from the included slots, not from "contains a critical
 ```text
 package.publication_ready = all included slots are publication_safe
 package.publication_blockers = ["slot T1 uses standard_internal", ...]
+```
+
+A current four-slot complete that includes WFS/SPARQL `standard` slots is `publication_ready=false`. Do not send it externally. `package_status.json` and `slot_inventory.json` are always written.
+
+A `minimal_publication`-only package omits Excel. This warning is expected and is not a failure:
+
+```text
+WARN: Excel inclusion is disabled for minimal_publication-only packages
 ```
 
 ## Golden Path

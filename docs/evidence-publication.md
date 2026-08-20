@@ -6,7 +6,7 @@ This policy defines the boundary between internal IPPCP execution evidence and a
 
 The policy applies to evidence derived from the current phase scripts and evidence export tools. It does not make an artifact public automatically. Automated sanitization is a safeguard; manual review and explicit publication approval remain mandatory.
 
-The canonical execution and traceability model is documented in [Evidence and traceability](evidence-and-traceability.md).
+The canonical execution and traceability model is documented in [Evidence and traceability](evidence-and-traceability.md). Exporter commands: [`tools/tools_README.md`](../tools/tools_README.md). Tooling model: [`tools/evidence_tooling.md`](../tools/evidence_tooling.md).
 
 ## Evidence tiers
 
@@ -66,41 +66,50 @@ Public examples:
 
 ## Publication profiles
 
-An evidence profile defines the artifacts and fields that an exporter may release.
+An evidence profile defines the artifacts and fields that an exporter may release. Profiles are properties of a **classified asset**, not of a slot id.
 
-The T4 `minimal_publication` profile is metadata-only. It uses an explicit archive-entry allowlist and field-level JSON allowlists. It does not copy a complete run directory and then attempt to remove unsafe files.
+`minimal_publication` belongs to `ingestion_api_v2`. It is metadata-only. It uses an explicit archive-entry allowlist and field-level JSON allowlists. It does not copy a complete run directory and then attempt to remove unsafe files. The same profile applies when that asset occupies T1, T2, T3, or T4.
 
-T1, T2, and T3 retain their existing delivery export behavior. The stricter T4 publication profile must not silently change their definitions, artifact selection, or output structure.
+`standard` is the current delivery profile for CSV/B2 legacy, WFS, and SPARQL. It is `publication_safe=false` (`standard_internal`). Those slots may retain real identifiers, local paths, global snapshots, and cross-asset references. A package is `publication_ready` only when every included slot is `publication_safe`. A current four-slot complete that includes WFS/SPARQL is therefore internal. Do not send a `publication_ready=false` package externally.
 
-This separation follows the security boundary of the validated flows. T1 is the delivered CSV-based ingestion baseline; T2 and T3 are the delivered WFS and SPARQL evidence flows. T4 validates the protected Ingestion API through `HttpData-PULL`.
+Unlike an unauthenticated public endpoint, the Ingestion API requires provider-side `X-Api-Key` and `X-Provider-Id` values at the Provider Data Plane boundary. They remain invisible to the consumer and are not carried in the EDR. The evidence tools neither obtain nor propagate these operational values, and no package, workbook, or public example may contain them.
 
-Unlike an unauthenticated public endpoint, that upstream API requires provider-side `X-Api-Key` and `X-Provider-Id` values at the Provider Data Plane boundary. They remain invisible to the consumer and are not carried in the EDR. The evidence tools neither obtain nor propagate these operational values, and no package, workbook, or public example may contain them.
+CSV/B2/InesDataStore remains a legacy historical baseline. It is not the current Golden Path.
 
-The shared T4 model and its separate sanitized-output rules enforce this stricter publication boundary. They do not classify T4 as secondary, experimental, or less valid. Mixed T1–T4 outputs remain internal because the delivered T1–T3 process intentionally retains identifiers, paths, and hashes.
+### `minimal_publication` archive-entry allowlist
 
-### T4 archive-entry allowlist
-
-A T4-only archive contains exactly:
+A package that contains only `minimal_publication` slots contains exactly:
 
 ```text
 ippcp_evidence_package/
   README_PACKAGE.txt
   package_manifest.json
   package_manifest.csv
-  T4_ingestion_api/
+  package_status.json
+  slot_inventory.json
+  <slot>_<asset-slug>/
     sanitized_summary.json
     sanitized_manifest.json
     validation_status.json
 ```
 
-Any unknown T4 archive entry fails strict validation.
+The folder name is derived from the slot plus the classified asset slug (for example `T3_ingestion_api` when Ingestion API occupies T3). It is not hard-wired to `T4_ingestion_api`.
 
-### T4 field allowlists
+Any unknown archive entry fails strict validation. Excel is not included. The exporter may print:
+
+```text
+WARN: Excel inclusion is disabled for minimal_publication-only packages
+```
+
+That warning is expected. It is not a failure.
+
+### `minimal_publication` field allowlists
 
 `sanitized_summary.json` permits only:
 
 - schema version;
-- test identifier;
+- test identifier and slot;
+- classified `asset_key`, family, variant, transport, critical, publication profile, and `publication_safe`;
 - flow type;
 - asset type;
 - evidence role;
@@ -126,19 +135,17 @@ Any unknown T4 archive entry fails strict validation.
 - confirmation that payloads, phase environments, requests, responses, and real identifiers were excluded;
 - confirmation that the private-payload hash value was withheld.
 
-The package manifests use only their fixed inventory fields. T4 inventory rows contain no source path and use `<run-id>` instead of the runtime suffix.
+The package manifests use only their fixed inventory fields. `minimal_publication` inventory rows contain no source path and use `<run-id>` instead of the runtime suffix.
+
+Every package also writes `package_status.json` (`publication_ready`, `publication_blockers`, per-slot inventory) and `slot_inventory.json`.
 
 ### XLSX boundary
 
-T4 is supported by `export_evidence_to_excel.py` through the same canonical `minimal_publication` model used by the bundle exporter. A T4-only workbook contains five visible sheets:
+`export_evidence_to_excel.py` projects `minimal_publication` slots through the same canonical model used by the bundle exporter. A single-slot Ingestion API workbook includes `Slot Map`, `Summary`, the classified slot sheet, `Raw JSON Index`, `Evidence Checklist`, and `Package Manifest`.
 
-- `Summary`;
-- `Raw JSON Index`;
-- `Evidence Checklist`;
-- `Package Manifest`;
-- `T4_ingestion_api`.
+Those cells are restricted to explicit mappings from the canonical model. Delivery-only columns use `not_recorded` or `not_applicable`; the private payload hash is replaced by the withheld marker. The runtime suffix is used only to locate internal evidence and must not survive in the workbook filename, cells, sheet names, properties, defined names, ZIP metadata, or relationships.
 
-T4 cells are restricted to explicit mappings from the canonical model. Delivery-only columns use `not_recorded` or `not_applicable`; the private payload hash is replaced by the withheld marker. The runtime suffix is used only to locate internal evidence and must not survive in the workbook filename, cells, sheet names, properties, defined names, ZIP metadata, or relationships.
+Stable names are `ippcp_evidence_summary_<TIMESTAMP>.xlsx` and `ippcp_evidence_package_<TIMESTAMP>.zip`. Do not use `ippcp_t4_publication.xlsx`, `ippcp_t4_publication.zip`, or globs such as `ippcp_evidence_summary_*.xlsx`. Commands: [`tools/tools_README.md`](../tools/tools_README.md).
 
 Before writing the file, the exporter audits the in-memory workbook. It then audits the serialized OOXML package and reloads it for a final structural check. The controls cover:
 
@@ -154,21 +161,20 @@ Before writing the file, the exporter audits the in-memory workbook. It then aud
 - shared strings when present;
 - custom XML and unexpected OOXML parts.
 
-An unexpected OOXML part is rejected unless it belongs to the reviewed workbook structure. A T4-only workbook is eligible for publication only after this audit succeeds and a manual review is completed.
+An unexpected OOXML part is rejected unless it belongs to the reviewed workbook structure. A `minimal_publication` workbook is eligible for publication only after this audit succeeds and a manual review is completed.
 
-T1–T3 Excel behavior remains unchanged. A mixed T1–T4 workbook preserves their intentional delivery suffixes, identifiers, paths, and hashes, so it is an internal evidence artifact. Existing T1–T3 values are accepted only at their compatibility-baseline locations; new cells, relationships, hidden content, or structural drift are rejected.
+`standard` Excel sheets preserve intentional delivery suffixes, identifiers, paths, and hashes, so any package that includes them is an internal evidence artifact (`publication_ready=false`).
 
-The T4 publication ZIP allowlist remains JSON and text only. Enabling the workbook does not add an XLSX entry to that archive.
+The `minimal_publication` ZIP allowlist remains JSON and text only. Enabling the workbook does not add an XLSX entry to that archive.
 
 ### Output classifications
 
-- **T4-only sanitized bundle:** eligible for publication after manual review.
-- **T4-only sanitized workbook:** eligible for publication after the full OOXML audit and manual review.
-- **Mixed T1–T4 bundle:** internal unless a future all-tests publication profile is approved.
-- **Mixed T1–T4 workbook:** internal because T1–T3 retain delivery metadata.
+- **`minimal_publication` sanitized bundle:** eligible for publication after manual review when `publication_ready=true`.
+- **`minimal_publication` sanitized workbook:** eligible for publication after the full OOXML audit and manual review.
+- **Complete or mixed package with any `standard_internal` slot:** internal. Do not send it externally.
 - **Synthetic JSON example:** public, versioned structural documentation.
 
-A public-safe workbook or bundle covering all tests would require an explicit future decision to sanitize T1–T3.
+A public-safe workbook or bundle covering WFS/SPARQL would require an explicit future decision to change those assets' publication policy.
 
 ## Allowed artifact classes after sanitization
 
@@ -307,17 +313,18 @@ Final retention duration and archive ownership remain project governance decisio
 
 ## Relationship to the evidence model
 
-The evidence roles remain distinct:
+`T1`–`T4` are exporter slots. Publication policy is attached to the classified asset.
 
-- T1 is the delivered CSV/B2 baseline;
-- T2 is delivered WFS evidence;
-- T3 is delivered SPARQL evidence;
-- T4 is additional validated Ingestion API v2 integration.
+- `ingestion_api_v2` uses `minimal_publication`.
+- `csv_b2_legacy` is a legacy historical baseline and uses `standard` (`standard_internal`).
+- `wfs_juntas`, `wfs_ciudad`, and `sparql` currently use `standard` (`standard_internal`).
 
-T4 does not replace, reinterpret, or relabel T1. Adding a T4 export profile does not make T4 delivered assessment evidence.
+CSV/B2 does not replace, and is not replaced by, Ingestion API v2. Historical T1–T3 assessment suffixes are selected only with `--preset legacy_assessment` or `--preset legacy_test3`.
 
 ## Related documentation
 
+- [Evidence export CLI](../tools/tools_README.md)
+- [Evidence tooling model](../tools/evidence_tooling.md)
 - [Evidence and traceability](evidence-and-traceability.md)
 - [Authentication](authentication.md)
 - [Architecture](architecture.md)

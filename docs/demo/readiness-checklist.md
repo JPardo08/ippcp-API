@@ -60,22 +60,19 @@ The checklist does not establish formal KPI or assessment compliance. It verifie
 - [ ] Any prepared output is sanitized and approved.
 - [ ] No raw password, API key, JWT, EDR authorization, or credential file is included.
 - [ ] No raw `phase*_env.sh` file is displayed or published.
-- [ ] T1 is described as the delivered CSV/B2 baseline.
-- [ ] T2 is described as delivered WFS evidence.
-- [ ] T3 is described as delivered SPARQL evidence.
-- [ ] T4 is described as additional validated Ingestion API v2 integration.
-- [ ] T4 does not replace or reinterpret T1.
-- [ ] A T4 export uses an explicitly supplied runtime suffix; no T4 run is selected from versioned configuration.
-- [ ] `package_evidence_bundle.py` and `export_evidence_to_excel.py` use the same T4 selection semantics and canonical sanitized model.
-- [ ] A publication-ready T4 bundle uses `--only-tests T4`, a runtime `--tests T4=<suffix>` override, and `--strict`.
-- [ ] The T4 archive contains only the allowlisted summary, manifest metadata, validation status, README, and package inventories.
-- [ ] Every T4 JSON structure passes its field-level allowlist.
-- [ ] A T4-only workbook uses `--only-tests T4`, a runtime `--tests T4=<suffix>` override, and the stable public-safe output name.
-- [ ] The T4-only workbook has five visible sheets and passes the complete in-memory and serialized OOXML audit.
-- [ ] The T4 runtime suffix is absent from workbook cells, names, properties, relationships, and package metadata.
-- [ ] Any mixed T1–T4 bundle or workbook is classified as internal evidence.
-- [ ] No XLSX file has been added to the six-entry T4 publication ZIP allowlist.
-- [ ] The [synthetic T4 example](../../examples/evidence/t4-ingestion-api/README.md) is identified as structural documentation, not raw validation evidence.
+- [ ] CSV/B2/InesDataStore is described as a legacy historical baseline, not the current Golden Path.
+- [ ] Ingestion API v2 is described as the current HttpData-PULL ingestion validation, with `minimal_publication` attached to the asset rather than to slot T4.
+- [ ] T1–T4 in exporter commands are described as slots, not as fixed asset types.
+- [ ] An export uses explicit `--tests SLOT=SUFFIX` or `--preset`; no silent default slot set.
+- [ ] `package_evidence_bundle.py` and `export_evidence_to_excel.py` use the same selection semantics.
+- [ ] A publication-ready Ingestion API bundle uses `--tests` with that run in any slot, `--strict`, and has `publication_ready=true`.
+- [ ] A `minimal_publication` archive contains only the allowlisted summary, manifest metadata, validation status, README, `package_status.json`, `slot_inventory.json`, and package inventories.
+- [ ] Every `minimal_publication` JSON structure passes its field-level allowlist.
+- [ ] A `minimal_publication` workbook uses deterministic `ippcp_evidence_summary_<TIMESTAMP>.xlsx` naming and passes the complete in-memory and serialized OOXML audit.
+- [ ] Runtime suffixes of `minimal_publication` slots are absent from workbook cells, names, properties, relationships, and package metadata.
+- [ ] Any package with `publication_ready=false` is classified as internal and is not sent externally.
+- [ ] No XLSX file has been added to the `minimal_publication` ZIP allowlist.
+- [ ] The [synthetic Ingestion API example](../../examples/evidence/t4-ingestion-api/README.md) is identified as structural documentation, not raw validation evidence.
 
 ## Presentation readiness
 
@@ -118,8 +115,8 @@ The checklist does not establish formal KPI or assessment compliance. It verifie
 - [ ] No phase environment, raw request, raw response, preview, data-address content, or source path is present.
 - [ ] Any cryptographic hash value has explicit publication approval; otherwise the value is withheld.
 - [ ] The [Evidence Publication Policy](../evidence-publication.md) has been applied and manually reviewed.
-- [ ] Any T4-only workbook has passed its automated OOXML audit and a separate manual workbook review.
-- [ ] A mixed T1–T4 workbook is not presented as a public-safe artifact.
+- [ ] Any `minimal_publication` workbook has passed its automated OOXML audit and a separate manual workbook review.
+- [ ] A package with `publication_ready=false` is not presented as a public-safe artifact.
 - [ ] All local links and referenced repository paths resolve.
 - [ ] All public-candidate text is in English.
 - [ ] Licensing and acknowledgements have been checked against the repository [LICENSE](../../LICENSE).

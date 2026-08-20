@@ -1,5 +1,7 @@
 # T4 Ingestion API usage example
 
+The `T4` in this filename is historical. Current evidence tooling treats T1–T4 as slots; Ingestion API v2 is classified from the run and uses `minimal_publication` in any slot.
+
 ## Purpose
 
 This sanitized companion explains the current IPPCP v2 Ingestion API integration. It covers a controlled direct preflight and access through the EdD data space. It contains no operational credentials, execution identifiers, local paths, response payloads, or private hashes.
@@ -47,7 +49,7 @@ The response file remains local, non-versioned output under a path covered by `.
 6. The provider Data Plane applies the upstream headers and invokes the Ingestion API.
 7. The consumer receives the result through the data-space path without receiving the upstream API credentials.
 
-The current public workflow version is v2. Legacy v1/B2 material exists only for historical reproducibility and is not the T4 path.
+The current public workflow version is v2. Legacy v1/B2 material exists only for historical reproducibility and is not the current Ingestion API path.
 
 ## Authentication boundaries
 
@@ -57,13 +59,15 @@ These credentials are not interchangeable. Upstream credential values remain pro
 
 ## Evidence and publication status
 
-`package-T4-only.zip` and `evidence-T4-only.xlsx` are the two T4 evidence artifacts. They use the `minimal_publication` profile and are delivered separately from this repository. They are not claimed to be hosted or versioned in Git.
+Sanitized Ingestion API evidence artifacts use the `minimal_publication` profile attached to `ingestion_api_v2`, not to slot T4. They are delivered separately from this repository and are not claimed to be hosted or versioned in Git.
 
-This Markdown file is companion documentation, not a third evidence artifact.
+This Markdown file is companion documentation, not an evidence artifact.
 
-Versioned synthetic examples live in `examples/evidence/t4-ingestion-api/`. The synthetic public example may show `semantic_validation.status = passed`; that status applies only to the synthetic example.
+Versioned synthetic examples live in `examples/evidence/t4-ingestion-api/`. The directory name is historical. The synthetic public example may show `semantic_validation.status = passed`; that status applies only to the synthetic example.
 
-The externally delivered T4 evidence deliberately uses `semantic_validation.status = not_recorded` under the `minimal_publication` profile. This means semantic details were intentionally not recorded in the public projection and does not indicate a functional failure of the validated flow. The synthetic-example status and the real-delivery status are not asserted to be identical.
+Externally delivered Ingestion API evidence deliberately uses `semantic_validation.status = not_recorded` under the `minimal_publication` profile. This means semantic details were intentionally not recorded in the public projection and does not indicate a functional failure of the validated flow. The synthetic-example status and the real-delivery status are not asserted to be identical.
+
+Exporter commands: [`tools/tools_README.md`](../tools/tools_README.md). Publication rules: [Evidence Publication Policy](evidence-publication.md).
 
 ## Security notice
 

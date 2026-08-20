@@ -88,13 +88,13 @@ See [Authentication](../authentication.md) for the complete boundary and persist
 
 ### Evidence-profile rationale
 
-This protected upstream boundary is why the additional validated T4 integration uses a separate evidence and publication profile. T4 covers the Ingestion API through `HttpData-PULL`; it does not replace the delivered T1 CSV-based ingestion baseline or the delivered T2 WFS and T3 SPARQL evidence flows.
+This protected upstream boundary is why Ingestion API v2 uses a separate evidence publication profile. The asset `ingestion_api_v2` is classified from the run and uses `publication_profile=minimal_publication` in any slot. That profile does not belong to T4. CSV/B2/InesDataStore remains a legacy historical baseline; it is not replaced by this flow.
 
 The provider-side `X-Api-Key` and `X-Provider-Id` values stay inside the provider boundary. They are not public values, are not sent to the consumer, are not propagated through the EDR, and are not dynamically obtained by the evidence tools. They must not appear in evidence packages, workbooks, or public examples.
 
-T4 therefore projects only the shared `minimal_publication` model through strict allowlists and sanitized-output rules. This reflects a stricter security and publication boundary, not lower validity or experimental status. Mixed T1–T4 outputs remain internal because T1–T3 preserve identifiers, paths, and hashes from the delivered evidence process.
+The exporter therefore projects only the shared `minimal_publication` model through strict allowlists and sanitized-output rules. This reflects a stricter security and publication boundary, not lower validity or experimental status. Packages that also include `standard` WFS/SPARQL slots remain internal (`publication_ready=false`) and must not be sent externally.
 
-See [Evidence and traceability](../evidence-and-traceability.md) and the [Evidence Publication Policy](../evidence-publication.md) for the export boundary.
+See [Evidence and traceability](../evidence-and-traceability.md), the [Evidence Publication Policy](../evidence-publication.md), and the [evidence export CLI](../../tools/tools_README.md) for the export boundary.
 
 ## Phase 1 behavior
 
