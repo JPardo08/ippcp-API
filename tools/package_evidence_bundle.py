@@ -16,6 +16,15 @@ from typing import Any, Dict, List, Optional
 
 from openpyxl import load_workbook
 
+from evidence_assets import (
+    ClassificationError,
+    classify_loader,
+    is_minimal_profile,
+    load_asset_registry,
+    package_publication_status,
+    slot_inventory_row,
+    validate_classified_run,
+)
 from evidence_common import (
     ConnectorSanitizer,
     EvidenceRunLoader,
@@ -26,14 +35,15 @@ from evidence_common import (
     PublicationScanner,
     SecretScanner,
     SummaryParser,
-    T4PublicationModel,
+    MinimalPublicationModel,
     build_test_specs,
     compute_sha256,
-    extract_t4_publication_model,
+    extract_minimal_publication_model,
     find_repo_root,
     load_test_config,
     parse_only_tests,
     parse_tests_override,
+    NO_SLOTS_SELECTED_ERROR,
     relative_to_repo,
     resolve_repo_path,
     validate_allowlisted_json,
@@ -50,6 +60,14 @@ MINIMAL_PUBLICATION_JSON_SCHEMAS: Dict[str, Dict[str, Any]] = {
     "sanitized_summary.json": {
         "schema_version": None,
         "test_id": None,
+        "slot": None,
+        "asset_key": None,
+        "family": None,
+        "variant": None,
+        "transport": None,
+        "critical": None,
+        "publication_profile": None,
+        "publication_safe": None,
         "flow_type": None,
         "asset_type": None,
         "evidence_role": None,
@@ -117,17 +135,37 @@ MANIFEST_FIELDS = [
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, help="YAML/JSON config with tests")
-    parser.add_argument("--tests", help="Override tests as T1=SUFFIX,T2=SUFFIX")
-    parser.add_argument("--only-tests", help="Select only these configured test IDs, comma-separated")
+    parser.add_argument(
+        "--tests",
+        help="Exact slot mapping SLOT=SUFFIX,SLOT=SUFFIX. No other slots are added.",
+    )
+    parser.add_argument(
+        "--preset",
+        help="Named historical/canonical slot mapping from config (does not bind assets to slots)",
+    )
+    parser.add_argument(
+        "--only-tests",
+        help="Filter the selected slot set (--tests or --preset) to these IDs, comma-separated",
+    )
     parser.add_argument("--excel", help="Optional Excel report to include")
     parser.add_argument("--output", help="Output .zip path")
     parser.add_argument("--export-dir", help="Base directory for timestamped exports")
     parser.add_argument("--timestamp", help="Timestamp to use for generated names, format YYYYMMDD_HHMMSS")
     parser.add_argument("--timestamp-suffix", action="store_true", help="Append timestamp before .zip")
     parser.add_argument("--repo-root", help="Repository root")
-    parser.add_argument("--sanitize-connectors", action="store_true", help="Apply connector aliases to packaged copies")
-    parser.add_argument("--redact-local-paths", action="store_true", default=True, help="Redact absolute local repo paths")
-    parser.add_argument("--no-redact-local-paths", dest="redact_local_paths", action="store_false", help="Do not redact local paths")
+    parser.add_argument("--profile", help="Policy profile from config (does not assign assets to slots)")
+    parser.add_argument(
+        "--sanitize-connectors",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Apply connector aliases to packaged copies (default: profile/policy)",
+    )
+    parser.add_argument(
+        "--redact-local-paths",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Redact absolute local repo paths (default: profile/policy)",
+    )
     parser.add_argument("--include-downloaded-assets", action="store_true", help="Include latest downloaded assets")
     parser.add_argument("--strict", action="store_true", help="Fail on warnings/audit findings")
     parser.add_argument("--dry-run", action="store_true", help="List planned package entries without writing ZIP")
@@ -328,13 +366,24 @@ def stage_external_file(
 
 
 def build_minimal_publication_documents(
-    model: T4PublicationModel,
+    model: MinimalPublicationModel,
+    spec=None,
 ) -> Dict[str, Dict[str, Any]]:
-    """Project the neutral T4 model into the package JSON contract."""
+    """Project the neutral minimal publication model into the package JSON contract."""
     return {
         "sanitized_summary.json": {
             "schema_version": "1.0",
             "test_id": model.test_id,
+            "slot": model.test_id,
+            "asset_key": spec.asset_key if spec else "ingestion_api_v2",
+            "family": spec.family if spec else "ingestion",
+            "variant": spec.variant if spec else "api_v2",
+            "transport": spec.transport if spec else "HttpData-PULL",
+            "critical": True if spec is None else bool(spec.critical),
+            "publication_profile": (
+                spec.publication_profile if spec else "minimal_publication"
+            ),
+            "publication_safe": True if spec is None else bool(spec.publication_safe),
             "flow_type": model.flow_type,
             "asset_type": model.asset_type,
             "evidence_role": model.evidence_role,
@@ -383,8 +432,8 @@ def stage_minimal_publication(
     spec,
     staging_root: Path,
 ) -> None:
-    model = extract_t4_publication_model(loader, spec)
-    documents = build_minimal_publication_documents(model)
+    model = extract_minimal_publication_model(loader, spec)
+    documents = build_minimal_publication_documents(model, spec)
     if set(documents) != MINIMAL_PUBLICATION_FILES:
         raise RuntimeError("minimal publication documents differ from the archive allowlist")
 
@@ -462,12 +511,14 @@ def write_package_readme(staging_root: Path, config: Dict[str, Any], specs, sani
     minimal_only = bool(specs) and all(spec.publication_profile == MINIMAL_PUBLICATION_PROFILE for spec in specs)
     if minimal_only:
         contents = [
+            "- package_status.json records publication_ready from per-slot publication_safe.",
             "- Per-test sanitized summary, manifest metadata, and validation status.",
             "- package_manifest.json and package_manifest.csv list the allowlisted files.",
             "- No raw phase artifact, phase environment, source path, or downloaded payload is included.",
         ]
     else:
         contents = [
+            "- package_status.json records publication_ready from per-slot publication_safe.",
             "- Excel summary report, when provided with --excel.",
             "- Per-test evidence folders with summary.json, non-sensitive JSON artifacts, .http files, and download manifests.",
             "- package_manifest.json and package_manifest.csv list included and excluded files.",
@@ -493,7 +544,12 @@ def write_package_readme(staging_root: Path, config: Dict[str, Any], specs, sani
         if sanitize_connectors:
             provider = ConnectorSanitizer.apply(provider, config.get("connector_aliases"), False)
             consumer = ConnectorSanitizer.apply(consumer, config.get("connector_aliases"), False)
-        lines.append(f"- {spec.test_id}: workflow={spec.workflow}, suffix={suffix}, provider={provider}, consumer={consumer}")
+        lines.append(
+            f"- {spec.test_id}: asset={spec.display_name or spec.asset_key}, "
+            f"family={spec.family}, transport={spec.transport}, "
+            f"critical={spec.critical}, publication={spec.publication_profile}, "
+            f"suffix={suffix}, provider={provider}, consumer={consumer}"
+        )
     lines.extend(
         [
             "",
@@ -560,9 +616,12 @@ def audit_zip(zip_path: Path, sanitize_connectors: bool) -> List[str]:
     return findings
 
 
-def minimal_publication_archive_allowlist(spec) -> set[str]:
+def minimal_publication_archive_allowlist(specs) -> set[str]:
+    if not isinstance(specs, list):
+        specs = [specs]
     entries = {
         f"{PACKAGE_ROOT}/{spec.sheet_name}/{file_name}"
+        for spec in specs
         for file_name in MINIMAL_PUBLICATION_FILES
     }
     entries.update(
@@ -570,14 +629,16 @@ def minimal_publication_archive_allowlist(spec) -> set[str]:
             f"{PACKAGE_ROOT}/README_PACKAGE.txt",
             f"{PACKAGE_ROOT}/package_manifest.json",
             f"{PACKAGE_ROOT}/package_manifest.csv",
+            f"{PACKAGE_ROOT}/package_status.json",
+            f"{PACKAGE_ROOT}/slot_inventory.json",
         }
     )
     return entries
 
 
-def audit_minimal_publication_zip(zip_path: Path, spec) -> List[str]:
+def audit_minimal_publication_zip(zip_path: Path, specs) -> List[str]:
     findings: List[str] = []
-    allowed_entries = minimal_publication_archive_allowlist(spec)
+    allowed_entries = minimal_publication_archive_allowlist(specs)
     with zipfile.ZipFile(zip_path) as archive:
         actual_entries = {info.filename for info in archive.infolist() if not info.is_dir()}
         for name in sorted(actual_entries - allowed_entries):
@@ -650,42 +711,92 @@ def resolve_output_path(
     return path.with_name(f"{path.stem}_{ts}{path.suffix}")
 
 
+def _resolve_policy_flags(args, config: Dict[str, Any]) -> tuple[bool, bool]:
+    defaults = config.get("defaults") or {}
+    profile = (config.get("profiles") or {}).get(args.profile or "default") or {}
+    sanitize = args.sanitize_connectors
+    if sanitize is None:
+        sanitize = bool(profile.get("sanitize_connectors", defaults.get("sanitize_connectors", True)))
+    redact = args.redact_local_paths
+    if redact is None:
+        redact = bool(profile.get("redact_local_paths", defaults.get("redact_local_paths", True)))
+    return sanitize, redact
+
+
 def main() -> int:
     args = parse_args()
     repo_root = Path(args.repo_root).resolve() if args.repo_root else find_repo_root(Path(__file__).resolve())
     config = load_test_config(resolve_repo_path(repo_root, args.config))
     only_tests = parse_only_tests(args.only_tests)
-    specs = build_test_specs(config, parse_tests_override(args.tests), only_tests)
+    overrides = parse_tests_override(args.tests)
+    if args.tests and args.preset:
+        print("WARN: --tests takes precedence; --preset is ignored", file=sys.stderr)
+    try:
+        specs = build_test_specs(
+            config,
+            overrides,
+            only_tests,
+            preset=None if overrides else args.preset,
+        )
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     defaults = config.get("defaults") or {}
     evidence_dir = resolve_repo_path(repo_root, defaults.get("evidence_dir") or "evidencias/runs")
     downloads_dir = resolve_repo_path(repo_root, defaults.get("downloads_dir") or "downloads")
     warnings: List[str] = []
+    sanitize_connectors, redact_local_paths = _resolve_policy_flags(args, config)
 
     if not specs:
-        if only_tests:
+        print(NO_SLOTS_SELECTED_ERROR, file=sys.stderr)
+        return 1
+    try:
+        registry = load_asset_registry(config)
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    jobs = []
+    for spec in specs:
+        loader = EvidenceRunLoader(repo_root, evidence_dir, downloads_dir, spec)
+        if not loader.exists():
+            print(f"ERROR: {spec.test_id}: missing run summary at {loader.summary_path}", file=sys.stderr)
+            return 1
+        try:
+            loader.load(include_env=False)
+            loader, spec, _asset = classify_loader(loader, registry)
+        except ClassificationError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        except Exception as exc:
+            print(f"ERROR: {spec.test_id}: cannot load evidence: {exc}", file=sys.stderr)
+            return 1
+        if not is_minimal_profile(spec):
+            loader.env = loader.load_env_files()
+        validation = validate_classified_run(loader, spec)
+        if args.strict and not validation.ok:
             print(
-                "ERROR: selected tests have no configured or runtime suffix; "
-                "supply --tests TEST_ID=SUFFIX",
+                f"ERROR: {spec.test_id}: semantic validation failed: {', '.join(validation.findings)}",
                 file=sys.stderr,
             )
-        else:
-            print("ERROR: no tests configured", file=sys.stderr)
-        return 1
-    minimal_specs = [spec for spec in specs if spec.publication_profile == MINIMAL_PUBLICATION_PROFILE]
-    minimal_only = len(minimal_specs) == len(specs)
-    if minimal_specs and not minimal_only:
-        message = (
-            "minimal_publication T4 is mixed with delivery profiles; "
-            "use --only-tests T4 for a publication-ready T4 package"
-        )
-        warnings.append(message)
-        print(f"WARN: {message}", file=sys.stderr)
+            return 1
+        jobs.append((spec, loader, validation))
+
+    specs = [spec for spec, _, _ in jobs]
+    minimal_specs = [spec for spec in specs if is_minimal_profile(spec)]
+    minimal_only = bool(specs) and len(minimal_specs) == len(specs)
+    publication = package_publication_status(specs)
+    print(f"package.publication_ready={str(publication['publication_ready']).lower()}")
+    if publication["publication_blockers"]:
+        print("package.publication_blockers:", file=sys.stderr)
+        for blocker in publication["publication_blockers"]:
+            print(f"  {blocker}", file=sys.stderr)
     if minimal_specs and args.include_downloaded_assets:
-        message = "downloaded assets are forbidden for minimal_publication and will not be staged for T4"
+        message = "downloaded assets are forbidden for minimal_publication slots and will not be staged for those assets"
         warnings.append(message)
         print(f"WARN: {message}", file=sys.stderr)
-    if minimal_specs and args.excel:
-        message = "Excel inclusion is disabled for minimal_publication"
+    if minimal_only and args.excel:
+        message = "Excel inclusion is disabled for minimal_publication-only packages"
         warnings.append(message)
         print(f"WARN: {message}", file=sys.stderr)
     for spec in specs:
@@ -698,33 +809,24 @@ def main() -> int:
     staging_root.mkdir(parents=True, exist_ok=True)
     rows: List[Dict[str, Any]] = []
     indexer = FileIndexer(repo_root)
+    slot_rows: List[Dict[str, Any]] = []
     try:
-        for spec in specs:
-            loader = EvidenceRunLoader(repo_root, evidence_dir, downloads_dir, spec)
-            if not loader.exists():
-                message = f"{spec.test_id}: missing run summary at {loader.summary_path}"
-                warnings.append(message)
-                print(f"WARN: {message}", file=sys.stderr)
-                add_manifest_row(
-                    rows,
-                    test_id=spec.test_id,
-                    suffix="<run-id>" if spec.publication_profile == MINIMAL_PUBLICATION_PROFILE else spec.suffix,
-                    source_path="" if spec.publication_profile == MINIMAL_PUBLICATION_PROFILE else relative_to_repo(repo_root, loader.summary_path),
-                    category="evidence",
-                    included=False,
-                    exclusion_reason="missing_run",
+        for spec, loader, validation in jobs:
+            slot_rows.append(
+                slot_inventory_row(
+                    spec,
+                    suffix_value="<run-id>" if is_minimal_profile(spec) else spec.suffix,
+                    validation=validation,
                 )
-                continue
-            if spec.publication_profile == MINIMAL_PUBLICATION_PROFILE:
-                loader.load(include_env=False)
+            )
+            if is_minimal_profile(spec):
                 stage_minimal_publication(rows, loader, spec, staging_root)
                 continue
 
-            loader.load()
             parser = loader.parser or SummaryParser(loader.summary)
             entries = indexer.collect(loader.run_dir, spec, parser)
             for entry in entries:
-                stage_entry(rows, entry, spec.sheet_name, staging_root, repo_root, config, args.sanitize_connectors, args.redact_local_paths, args.strict, warnings)
+                stage_entry(rows, entry, spec.sheet_name, staging_root, repo_root, config, sanitize_connectors, redact_local_paths, args.strict, warnings)
             manifest = loader.canonical_manifest_path()
             if manifest:
                 stage_external_file(
@@ -737,8 +839,8 @@ def main() -> int:
                     staging_root=staging_root,
                     repo_root=repo_root,
                     config=config,
-                    sanitize_connectors=args.sanitize_connectors,
-                    redact_local_paths=args.redact_local_paths,
+                    sanitize_connectors=sanitize_connectors,
+                    redact_local_paths=redact_local_paths,
                 )
             if args.include_downloaded_assets:
                 extension = loader.env.get("ASSET_EXTENSION")
@@ -758,15 +860,56 @@ def main() -> int:
                         redact_local_paths=False,
                     )
 
-        if args.excel and not minimal_specs:
+        if args.excel and not minimal_only:
             excel_path = resolve_repo_path(repo_root, args.excel)
             if excel_path.exists():
-                stage_excel(rows, excel_path, staging_root, repo_root, config, args.sanitize_connectors, args.redact_local_paths)
+                stage_excel(rows, excel_path, staging_root, repo_root, config, sanitize_connectors, redact_local_paths)
             else:
                 add_manifest_row(rows, test_id="_package", source_path=relative_to_repo(repo_root, excel_path), category="excel", included=False, exclusion_reason="missing")
                 warnings.append(f"Excel not found: {excel_path}")
 
-        readme_path = write_package_readme(staging_root, config, specs, args.sanitize_connectors)
+        inventory_path = staging_root / "slot_inventory.json"
+        inventory_path.write_text(json.dumps(slot_rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        add_manifest_row(
+            rows,
+            test_id="_package",
+            source_path="" if minimal_only else "generated",
+            zip_path=f"{PACKAGE_ROOT}/slot_inventory.json",
+            category="slot_inventory",
+            size_bytes=inventory_path.stat().st_size,
+            sha256=compute_sha256(inventory_path),
+            sanitized=True,
+            included=True,
+        )
+        status_payload = {
+            **publication,
+            "slots": [
+                {
+                    "slot": row["slot"],
+                    "asset_variant": row["asset_variant"],
+                    "transport": row["transport"],
+                    "critical": row["critical"],
+                    "publication_profile": row["publication_profile"],
+                    "publication_safe": row["publication_safe"],
+                }
+                for row in slot_rows
+            ],
+        }
+        status_path = staging_root / "package_status.json"
+        status_path.write_text(json.dumps(status_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        add_manifest_row(
+            rows,
+            test_id="_package",
+            source_path="" if minimal_only else "generated",
+            zip_path=f"{PACKAGE_ROOT}/package_status.json",
+            category="package_status",
+            size_bytes=status_path.stat().st_size,
+            sha256=compute_sha256(status_path),
+            sanitized=True,
+            included=True,
+        )
+
+        readme_path = write_package_readme(staging_root, config, specs, sanitize_connectors)
         add_manifest_row(
             rows,
             test_id="_package",
@@ -775,7 +918,7 @@ def main() -> int:
             category="readme",
             size_bytes=readme_path.stat().st_size,
             sha256=compute_sha256(readme_path),
-            sanitized=args.sanitize_connectors,
+            sanitized=sanitize_connectors,
             included=True,
         )
         # Manifest files are self-referential: their final content changes when
@@ -807,14 +950,14 @@ def main() -> int:
             if output.exists():
                 output.unlink()
             print(
-                "ERROR: runtime T4 suffix appears in output filename",
+                "ERROR: runtime suffix of a minimal_publication slot appears in output filename",
                 file=sys.stderr,
             )
             return 1
         create_zip(staging_root, output)
-        audit_findings = audit_zip(output, args.sanitize_connectors)
+        audit_findings = audit_zip(output, sanitize_connectors)
         if minimal_only:
-            audit_findings.extend(audit_minimal_publication_zip(output, minimal_specs[0]))
+            audit_findings.extend(audit_minimal_publication_zip(output, minimal_specs))
         for finding in audit_findings:
             print(f"WARN: audit: {finding}", file=sys.stderr)
         print(f"ZIP written: {relative_to_repo(repo_root, output)}")

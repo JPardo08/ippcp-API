@@ -1,18 +1,37 @@
 # IPPCP evidence export configuration.
-# Current validated IPPCP runs:
-# - T1 ingesta / Excel-CSV: 1783070399
-# - T2 WFS ciudad: 1783070513
-# - T3 SPARQL format JSON: 1783070583
 #
-# Historical test3-era delivery suffixes kept here for traceability:
-# - T1: 1782294549
-# - T2: 1782299532
-# - T3: 1782299641
+# T1, T2, T3 and T4 are SLOT POSITIONS, not asset types.
+# The asset occupying a slot is classified from the run (summary/manifest/metadata).
+#
+# Slot selection is explicit:
+# - --tests SLOT=SUFFIX selects exactly those slots. No YAML autofill.
+# - --preset NAME selects a named historical/canonical slot map.
+# - --only-tests filters an already selected set; it does not invent slots.
+#
+# Current validated IPPCP runs (classified from evidence, not from slot id):
+# - 1783070399  csv_b2_legacy
+# - 1783070513  wfs_ciudad
+# - 1783070583  sparql
+#
+# Historical test3-era delivery suffixes:
+# - 1782294549  csv_b2_legacy
+# - 1782299532  wfs_ciudad
+# - 1782299641  sparql
 
 defaults:
   repo_root: .
   evidence_dir: evidencias/runs
   downloads_dir: downloads
+  sanitize_connectors: true
+  redact_local_paths: true
+
+profiles:
+  default:
+    sanitize_connectors: true
+    redact_local_paths: true
+  debug:
+    sanitize_connectors: false
+    redact_local_paths: false
 
 connector_aliases:
   conn-erick-test3: conn-company-ippcp
@@ -43,48 +62,175 @@ expected_workflow_roles:
     provider_role: citycouncil
     consumer_role: company
 
-tests:
-  T1:
-    suffix: "1783070399"
-    sheet_name: T1_ingesta_csv
-    workflow: ingesta
-    asset_type: InesDataStore
-    provider_connector: conn-erick-test3
-    consumer_connector: conn-edgar-test3
-    asset_config: asset_configs/real/ingesta/ingesta_bbdd_residencial_2021_csv.json
-    expected_phases: [phase0, phase1b, phase2, phase3b, phase4b]
-
-  # Current validated IPPCP WFS run. Historical suffix: 1782299532.
-  T2:
-    suffix: "1783070513"
-    sheet_name: T2_wfs
-    workflow: consumo
-    asset_type: HttpData
-    provider_connector: conn-edgar-test3
-    consumer_connector: conn-erick-test3
-    asset_config: asset_configs/real/consumo/wfs/emisiones_wfs_ciudad_geojson.json
-    expected_phases: [phase0, phase1, phase2, phase3, phase4]
-
-  # Current validated IPPCP SPARQL run. Historical suffix: 1782299641.
-  T3:
-    suffix: "1783070583"
-    sheet_name: T3_sparql
-    workflow: consumo
-    asset_type: HttpData
-    provider_connector: conn-edgar-test3
-    consumer_connector: conn-erick-test3
-    asset_config: asset_configs/real/consumo/sparql/emisiones_sparql_limit10_format_json.json
-    expected_phases: [phase0, phase1, phase2, phase3, phase4]
-
-  # T4 is selected only when its suffix is supplied explicitly at runtime.
-  T4:
-    suffix: ""
-    sheet_name: T4_ingestion_api
+assets:
+  ingestion_api_v2:
+    family: ingestion
+    variant: api_v2
+    display_name: Ingestion API v2
+    sheet_slug: ingestion_api
+    transport: HttpData-PULL
+    critical: true
+    publication_profile: minimal_publication
+    publication_safe: true
     workflow: ingesta_api
     asset_type: HttpData-PULL
+    evidence_role: additional_validation
+    expected_workflow_kind: b1
+    expected_phases: [phase0, phase1, phase2, phase3, phase4]
+    expected_content_kind: json
+    expected_extension: json
+    expected_media_type: application/json
+    expected_transfer_type: HttpData-PULL
     technical_provider_connector: CONN-CITYCOUNCIL
     technical_consumer_connector: CONN-COMPANY
     asset_config: asset_configs/real/ingesta/ingesta_api_pull_pre_api_key.json
+    validator: ingestion_api_v2
+    match:
+      asset_slugs:
+        - ippcp_ingesta_api_pull_pre_api_key
+      asset_config_suffixes:
+        - asset_configs/real/ingesta/ingesta_api_pull_pre_api_key.json
+        - ingesta_api_pull_pre_api_key.json
+      asset_id_prefixes:
+        - ippcp_ingesta_api_pull_pre_api_key-
+
+  csv_b2_legacy:
+    family: ingestion
+    variant: csv_b2
+    display_name: CSV B2 legacy
+    sheet_slug: ingesta_csv
+    transport: InesDataStore
+    critical: false
+    publication_profile: standard
+    publication_safe: false
+    workflow: ingesta
+    asset_type: InesDataStore
+    expected_workflow_kind: b2
+    expected_phases: [phase0, phase1b, phase2, phase3b, phase4b]
+    expected_content_kind: text
+    expected_extension: csv
+    expected_media_type: text/csv
+    provider_connector: conn-erick-test3
+    consumer_connector: conn-edgar-test3
+    asset_config: asset_configs/real/ingesta/ingesta_bbdd_residencial_2021_csv.json
+    validator: csv_b2_legacy
+    match:
+      asset_slugs:
+        - ippcp_ingesta_bbdd_residencial_2021_csv
+      asset_config_suffixes:
+        - asset_configs/real/ingesta/ingesta_bbdd_residencial_2021_csv.json
+        - ingesta_bbdd_residencial_2021_csv.json
+      asset_id_prefixes:
+        - ippcp_ingesta_bbdd_residencial_2021_csv-
+
+  wfs_juntas:
+    family: wfs
+    variant: juntas
+    display_name: WFS juntas
+    sheet_slug: wfs_juntas
+    transport: HttpData-PULL
+    critical: false
+    publication_profile: standard
+    publication_safe: false
+    workflow: consumo
+    asset_type: HttpData
+    expected_workflow_kind: b1
     expected_phases: [phase0, phase1, phase2, phase3, phase4]
-    publication_profile: minimal_publication
-    evidence_role: additional_validation
+    expected_content_kind: json
+    expected_extension: json
+    expected_media_type: application/json
+    expected_transfer_type: HttpData-PULL
+    provider_connector: conn-edgar-test3
+    consumer_connector: conn-erick-test3
+    asset_config: asset_configs/real/consumo/wfs/emisiones_wfs_juntas_geojson.json
+    validator: wfs_juntas
+    match:
+      asset_slugs:
+        - ippcp_emisiones_wfs_juntas_geojson
+      asset_config_suffixes:
+        - asset_configs/real/consumo/wfs/emisiones_wfs_juntas_geojson.json
+        - emisiones_wfs_juntas_geojson.json
+      asset_id_prefixes:
+        - ippcp_emisiones_wfs_juntas_geojson-
+
+  wfs_ciudad:
+    family: wfs
+    variant: ciudad
+    display_name: WFS ciudad
+    sheet_slug: wfs_ciudad
+    transport: HttpData-PULL
+    critical: false
+    publication_profile: standard
+    publication_safe: false
+    workflow: consumo
+    asset_type: HttpData
+    expected_workflow_kind: b1
+    expected_phases: [phase0, phase1, phase2, phase3, phase4]
+    expected_content_kind: json
+    expected_extension: json
+    expected_media_type: application/json
+    expected_transfer_type: HttpData-PULL
+    provider_connector: conn-edgar-test3
+    consumer_connector: conn-erick-test3
+    asset_config: asset_configs/real/consumo/wfs/emisiones_wfs_ciudad_geojson.json
+    validator: wfs_ciudad
+    match:
+      asset_slugs:
+        - ippcp_emisiones_wfs_ciudad_geojson
+      asset_config_suffixes:
+        - asset_configs/real/consumo/wfs/emisiones_wfs_ciudad_geojson.json
+        - emisiones_wfs_ciudad_geojson.json
+      asset_id_prefixes:
+        - ippcp_emisiones_wfs_ciudad_geojson-
+
+  sparql:
+    family: sparql
+    variant: results_json
+    display_name: SPARQL
+    sheet_slug: sparql
+    transport: HttpData-PULL
+    critical: false
+    publication_profile: standard
+    publication_safe: false
+    workflow: consumo
+    asset_type: HttpData
+    expected_workflow_kind: b1
+    expected_phases: [phase0, phase1, phase2, phase3, phase4]
+    expected_content_kind: json
+    expected_extension: json
+    expected_media_type: application/sparql-results+json
+    expected_transfer_type: HttpData-PULL
+    provider_connector: conn-edgar-test3
+    consumer_connector: conn-erick-test3
+    asset_config: asset_configs/real/consumo/sparql/emisiones_sparql_limit10_format_json.json
+    validator: sparql
+    match:
+      asset_slugs:
+        - ippcp_emisiones_sparql_limit10_format_json
+      asset_config_suffixes:
+        - asset_configs/real/consumo/sparql/emisiones_sparql_limit10_format_json.json
+        - emisiones_sparql_limit10_format_json.json
+      asset_id_prefixes:
+        - ippcp_emisiones_sparql_limit10_format_json-
+
+# No implicit slot defaults. Historical/canonical runs are selected with --preset.
+tests: {}
+
+presets:
+  legacy_assessment:
+    description: >
+      Delivered T1-T3 assessment evidence (CSV B2, WFS ciudad, SPARQL).
+      Explicit historical selection. T* remain slots; assets are classified
+      from each run. Uses current validated suffixes.
+    tests:
+      T1: "1783070399"
+      T2: "1783070513"
+      T3: "1783070583"
+  legacy_test3:
+    description: >
+      test3-era historical suffixes. Explicit selection only.
+      T* remain slots; assets are classified from each run.
+    tests:
+      T1: "1782294549"
+      T2: "1782299532"
+      T3: "1782299641"
