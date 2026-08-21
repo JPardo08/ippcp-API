@@ -470,6 +470,16 @@ class EvidenceExportTest(unittest.TestCase):
                 "payload_included": False,
                 "unknown": "must fail",
             },
+            "delivery": {
+                "mode": "download",
+                "operation": "not_recorded",
+                "http_method": "not_recorded",
+                "http_status": "not_recorded",
+                "manifest_kind": "not_recorded",
+                "request_body_persisted": False,
+                "response_body_persisted": False,
+                "download_persisted": False,
+            },
         }
         self.assertTrue(validate_allowlisted_json(invalid, schema))
 
@@ -748,6 +758,11 @@ class EvidenceExportTest(unittest.TestCase):
                 self.assertEqual(detail[identifier], value)
             for phase, status in model.phase_statuses.items():
                 self.assertEqual(detail[phase], status)
+            self.assertEqual(detail["delivery_mode"], model.delivery_mode)
+            self.assertEqual(detail["operation"], model.http_operation)
+            self.assertEqual(detail["http_method"], model.http_method)
+            self.assertEqual(detail["http_status"], model.http_status)
+            self.assertEqual(detail["manifest_kind"], model.manifest_kind)
             self.assertEqual(detail["download_status"], model.download_status)
             self.assertEqual(detail["byte_count"], model.byte_count)
             self.assertEqual(detail["sha256_algorithm"], model.sha256_algorithm)

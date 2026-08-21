@@ -7,6 +7,7 @@ Slots (T1..T4) are positions. Assets are detected from the run, never from the s
 from __future__ import annotations
 
 import csv
+import fnmatch
 import io
 import json
 from dataclasses import dataclass, field, replace
@@ -73,8 +74,10 @@ class AssetDefinition:
     technical_consumer_connector: str = NOT_FOUND
     asset_config: str = NOT_FOUND
     asset_slugs: Tuple[str, ...] = ()
+    asset_slug_patterns: Tuple[str, ...] = ()
     asset_config_suffixes: Tuple[str, ...] = ()
     asset_id_prefixes: Tuple[str, ...] = ()
+    asset_id_patterns: Tuple[str, ...] = ()
     validator: str = ""
 
 
@@ -150,11 +153,17 @@ def load_asset_registry(config: Dict[str, Any]) -> Dict[str, AssetDefinition]:
             ),
             asset_config=str(raw.get("asset_config") or NOT_FOUND),
             asset_slugs=tuple(str(item) for item in (match.get("asset_slugs") or ())),
+            asset_slug_patterns=tuple(
+                str(item) for item in (match.get("asset_slug_patterns") or ())
+            ),
             asset_config_suffixes=tuple(
                 str(item) for item in (match.get("asset_config_suffixes") or ())
             ),
             asset_id_prefixes=tuple(
                 str(item) for item in (match.get("asset_id_prefixes") or ())
+            ),
+            asset_id_patterns=tuple(
+                str(item) for item in (match.get("asset_id_patterns") or ())
             ),
             validator=str(raw.get("validator") or key),
         )
@@ -294,25 +303,42 @@ def _config_path_matches(actual: str, expected_suffix: str) -> bool:
     )
 
 
+def _matches_any_pattern(value: str, patterns: Tuple[str, ...]) -> bool:
+    return bool(value) and any(fnmatch.fnmatchcase(value, pattern) for pattern in patterns)
+
+
 def score_asset(asset: AssetDefinition, signals: RunSignals) -> int:
     score = 0
-    if signals.asset_slug and signals.asset_slug in asset.asset_slugs:
-        score += 100
+    if signals.asset_slug:
+        if signals.asset_slug in asset.asset_slugs or _matches_any_pattern(
+            signals.asset_slug, asset.asset_slug_patterns
+        ):
+            score += 100
     if signals.asset_config and any(
         _config_path_matches(signals.asset_config, suffix)
         for suffix in asset.asset_config_suffixes
     ):
         score += 100
     if signals.asset_id:
+        id_matched = False
         for prefix in asset.asset_id_prefixes:
             if signals.asset_id == prefix.rstrip("-") or signals.asset_id.startswith(prefix):
                 score += 80
+                id_matched = True
                 break
-        if not any(signals.asset_id.startswith(prefix) for prefix in asset.asset_id_prefixes):
+        if not id_matched and _matches_any_pattern(signals.asset_id, asset.asset_id_patterns):
+            score += 80
+            id_matched = True
+        if not id_matched:
             for slug in asset.asset_slugs:
                 if signals.asset_id == slug or signals.asset_id.startswith(f"{slug}-"):
                     score += 80
                     break
+            else:
+                # Hyphenated PROD ids may still match underscore slug patterns via normalization.
+                normalized = signals.asset_id.replace("-", "_")
+                if _matches_any_pattern(normalized, asset.asset_slug_patterns):
+                    score += 80
     if asset.expected_workflow_kind and signals.workflow_kind == asset.expected_workflow_kind:
         score += 5
     if asset.expected_content_kind and signals.content_kind == asset.expected_content_kind:
@@ -486,7 +512,95 @@ def _transfer_findings(signals: RunSignals, expected: str) -> List[str]:
     return []
 
 
+def load_post_metadata_artifacts(
+    loader: EvidenceRunLoader,
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Return (post_result, post_manifest) objects when present."""
+    result = _load_json_object(loader.run_dir / "phase4" / "post_result.json")
+    manifest = _load_json_object(loader.run_dir / "phase4" / "post_manifest.json")
+    return (
+        result if isinstance(result, dict) else None,
+        manifest if isinstance(manifest, dict) else None,
+    )
+
+
+def is_post_metadata_only_run(loader: EvidenceRunLoader) -> bool:
+    """True only when phase4 explicitly declares post_metadata_only semantics."""
+    _result, manifest = load_post_metadata_artifacts(loader)
+    return bool(manifest) and manifest.get("manifest_kind") == "post_metadata_only"
+
+
+def _require_equals(findings: List[str], label: str, actual: Any, expected: Any) -> None:
+    if actual != expected:
+        findings.append(f"{label}:{actual!r}")
+
+
+def _require_truthy(findings: List[str], label: str, actual: Any) -> None:
+    if actual in (None, ""):
+        findings.append(f"{label}:missing")
+
+
+def _require_http_success(findings: List[str], label: str, status: Any) -> None:
+    try:
+        code = int(status)
+    except (TypeError, ValueError):
+        findings.append(f"{label}:invalid")
+        return
+    if code < 200 or code >= 300:
+        findings.append(f"{label}:{code}")
+
+
+def _validate_post_metadata_flags(findings: List[str], prefix: str, payload: Dict[str, Any]) -> None:
+    _require_equals(findings, f"{prefix}.operation", payload.get("operation"), "POST")
+    _require_equals(findings, f"{prefix}.http_method", payload.get("http_method"), "POST")
+    _require_http_success(findings, f"{prefix}.http_status", payload.get("http_status"))
+    _require_equals(findings, f"{prefix}.status", payload.get("status"), "ok")
+    _require_equals(
+        findings, f"{prefix}.request_body_persisted", payload.get("request_body_persisted"), False
+    )
+    _require_equals(
+        findings, f"{prefix}.response_body_persisted", payload.get("response_body_persisted"), False
+    )
+    _require_equals(
+        findings, f"{prefix}.download_persisted", payload.get("download_persisted"), False
+    )
+
+
+def validate_ingestion_api_v2_post_metadata_only(
+    loader: EvidenceRunLoader, spec: TestSpec
+) -> ValidationResult:
+    """Validate explicit POST metadata-only phase4 evidence (no download/sha256)."""
+    signals = extract_run_signals(loader)
+    findings = _phase_findings(loader, spec.expected_phases or HTTP_PULL_PHASES)
+    findings.extend(_transfer_findings(signals, spec.expected_transfer_type or "HttpData-PULL"))
+    result, manifest = load_post_metadata_artifacts(loader)
+    if result is None:
+        findings.append("post_result:missing")
+    else:
+        _validate_post_metadata_flags(findings, "post_result", result)
+    if manifest is None:
+        findings.append("post_manifest:missing")
+    else:
+        _require_equals(
+            findings, "post_manifest.manifest_kind", manifest.get("manifest_kind"), "post_metadata_only"
+        )
+        _validate_post_metadata_flags(findings, "post_manifest", manifest)
+        _require_truthy(findings, "post_manifest.asset_id", manifest.get("asset_id"))
+        _require_truthy(findings, "post_manifest.agreement_id", manifest.get("agreement_id"))
+        _require_truthy(findings, "post_manifest.transfer_id", manifest.get("transfer_id"))
+    status = "passed" if not findings else "failed"
+    return ValidationResult(
+        status=status,
+        source="ingestion-api-post-metadata-validator",
+        findings=tuple(findings),
+    )
+
+
 def validate_ingestion_api_v2(loader: EvidenceRunLoader, spec: TestSpec) -> ValidationResult:
+    """Validate ingestion_api_v2 runs: GET/download or POST metadata-only."""
+    if is_post_metadata_only_run(loader):
+        return validate_ingestion_api_v2_post_metadata_only(loader, spec)
+
     signals = extract_run_signals(loader)
     findings = _phase_findings(loader, spec.expected_phases or HTTP_PULL_PHASES)
     findings.extend(_transfer_findings(signals, spec.expected_transfer_type or "HttpData-PULL"))
