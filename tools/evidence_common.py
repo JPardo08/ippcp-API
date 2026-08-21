@@ -11,7 +11,7 @@ import os
 import re
 import shlex
 import zipfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from xml.etree import ElementTree
@@ -43,10 +43,17 @@ EXCLUDE_PATTERNS = (
 )
 PHASE_NAMES = ("phase0", "phase1", "phase1b", "phase2", "phase3", "phase3b", "phase4", "phase4b")
 MINIMAL_PUBLICATION_PROFILE = "minimal_publication"
-T4_NOT_RECORDED = "not_recorded"
-T4_NOT_APPLICABLE = "not_applicable"
-T4_WITHHELD_HASH = "<withheld-pending-publication-approval>"
-T4_PLACEHOLDER_IDENTIFIERS = {
+STANDARD_PUBLICATION_PROFILE = "standard"
+SLOT_ORDER = ("T1", "T2", "T3", "T4")
+CELL_PROTECTED_STRUCTURE = "protected_structure"
+CELL_PROTECTED_FORMULA = "protected_formula"
+CELL_PROTECTED_TEMPLATE_TEXT = "protected_template_text"
+CELL_RUNTIME_POPULATED = "runtime_populated"
+CELL_SANITIZATION_ALLOWED = "sanitization_allowed"
+MINIMAL_PUBLICATION_NOT_RECORDED = "not_recorded"
+MINIMAL_PUBLICATION_NOT_APPLICABLE = "not_applicable"
+MINIMAL_PUBLICATION_WITHHELD_HASH = "<withheld-pending-publication-approval>"
+MINIMAL_PUBLICATION_PLACEHOLDER_IDENTIFIERS = {
     "run_id": "<run-id>",
     "asset_id": "<asset-id>",
     "contract_definition_id": "<contract-definition-id>",
@@ -54,9 +61,9 @@ T4_PLACEHOLDER_IDENTIFIERS = {
     "agreement_id": "<agreement-id>",
     "transfer_process_id": "<transfer-process-id>",
 }
-T4_PUBLIC_FLOW_LABEL = "Ingestion API v2"
-T4_ALLOWED_STATUSES = {"ok", "failed", "skipped", "not_found", "passed", T4_NOT_RECORDED}
-T4_OOXML_ALLOWED_PARTS = {
+MINIMAL_PUBLICATION_DEFAULT_FLOW_LABEL = "Ingestion API v2"
+MINIMAL_PUBLICATION_ALLOWED_STATUSES = {"ok", "failed", "skipped", "not_found", "passed", MINIMAL_PUBLICATION_NOT_RECORDED}
+MINIMAL_PUBLICATION_OOXML_ALLOWED_PARTS = {
     "[Content_Types].xml",
     "_rels/.rels",
     "docProps/app.xml",
@@ -66,7 +73,7 @@ T4_OOXML_ALLOWED_PARTS = {
     "xl/theme/theme1.xml",
     "xl/workbook.xml",
 }
-T4_OOXML_ALLOWED_PART_PATTERNS = (
+MINIMAL_PUBLICATION_OOXML_ALLOWED_PART_PATTERNS = (
     "xl/worksheets/sheet*.xml",
     "xl/worksheets/_rels/sheet*.xml.rels",
     "xl/sharedStrings.xml",
@@ -88,6 +95,90 @@ class TestSpec:
     expected_phases: List[str] = field(default_factory=list)
     publication_profile: str = ""
     evidence_role: str = ""
+    asset_key: str = ""
+    family: str = ""
+    variant: str = ""
+    transport: str = ""
+    critical: bool = False
+    display_name: str = ""
+    expected_content_kind: str = ""
+    expected_extension: str = ""
+    expected_media_type: str = ""
+    expected_transfer_type: str = ""
+    validator: str = ""
+    publication_safe: bool = False
+
+
+@dataclass(frozen=True)
+class CellContractEntry:
+    sheet: str
+    coordinate: str
+    category: str
+    value: Any = None
+    label: str = ""
+
+
+@dataclass
+class WorkbookContract:
+    """Explicit workbook cell contract used by the OOXML audit."""
+
+    entries: List[CellContractEntry] = field(default_factory=list)
+
+    def add(
+        self,
+        sheet: str,
+        coordinate: str,
+        category: str,
+        value: Any = None,
+        label: str = "",
+    ) -> None:
+        self.entries.append(
+            CellContractEntry(
+                sheet=sheet,
+                coordinate=coordinate,
+                category=category,
+                value=value,
+                label=label,
+            )
+        )
+
+    def by_sheet(self) -> Dict[str, List[CellContractEntry]]:
+        grouped: Dict[str, List[CellContractEntry]] = {}
+        for entry in self.entries:
+            grouped.setdefault(entry.sheet, []).append(entry)
+        return grouped
+
+    def coordinates(self, sheet: str, *categories: str) -> Set[str]:
+        wanted = set(categories)
+        return {
+            entry.coordinate
+            for entry in self.entries
+            if entry.sheet == sheet and (not wanted or entry.category in wanted)
+        }
+
+    def protected_snapshot(self) -> Dict[str, Dict[str, Any]]:
+        snapshot: Dict[str, Dict[str, Any]] = {}
+        for entry in self.entries:
+            if entry.category in {
+                CELL_PROTECTED_STRUCTURE,
+                CELL_PROTECTED_FORMULA,
+                CELL_PROTECTED_TEMPLATE_TEXT,
+            }:
+                snapshot.setdefault(entry.sheet, {})[entry.coordinate] = entry.value
+        return snapshot
+
+    def coordinates_by_category(self, *categories: str) -> Dict[str, Set[str]]:
+        wanted = set(categories)
+        result: Dict[str, Set[str]] = {}
+        for entry in self.entries:
+            if entry.category in wanted:
+                result.setdefault(entry.sheet, set()).add(entry.coordinate)
+        return result
+
+    def runtime_coordinates(self) -> Dict[str, Set[str]]:
+        return self.coordinates_by_category(
+            CELL_RUNTIME_POPULATED, CELL_SANITIZATION_ALLOWED
+        )
 
 
 @dataclass
@@ -108,8 +199,11 @@ class FileEntry:
 
 
 @dataclass(frozen=True)
-class T4PublicationModel:
-    """Canonical, presentation-neutral T4 minimal-publication values."""
+class MinimalPublicationModel:
+    """Canonical projection for a minimal_publication asset.
+
+    Slot ids never select this renderer; publication_profile does.
+    """
 
     test_id: str
     public_flow_label: str
@@ -129,16 +223,16 @@ class T4PublicationModel:
     semantic_validation_source: str
     execution_identifiers: Dict[str, str]
     payload_included: bool
-    not_recorded: str = T4_NOT_RECORDED
-    not_applicable: str = T4_NOT_APPLICABLE
+    not_recorded: str = MINIMAL_PUBLICATION_NOT_RECORDED
+    not_applicable: str = MINIMAL_PUBLICATION_NOT_APPLICABLE
 
 
-def canonical_t4_status(value: Any) -> str:
+def canonical_minimal_publication_status(value: Any) -> str:
     normalized = str(value or NOT_FOUND).lower()
-    return normalized if normalized in T4_ALLOWED_STATUSES else NOT_FOUND
+    return normalized if normalized in MINIMAL_PUBLICATION_ALLOWED_STATUSES else NOT_FOUND
 
 
-def build_t4_publication_model(
+def build_minimal_publication_model(
     *,
     test_id: str,
     asset_type: str,
@@ -149,71 +243,73 @@ def build_t4_publication_model(
     download_status: Any,
     byte_count: Any,
     sha256_verified: bool,
-    semantic_validation_status: Any = T4_NOT_RECORDED,
+    semantic_validation_status: Any = MINIMAL_PUBLICATION_NOT_RECORDED,
     semantic_validation_recorded: bool = False,
-) -> T4PublicationModel:
-    """Build and validate the pure canonical T4 publication model."""
+    public_flow_label: str = MINIMAL_PUBLICATION_DEFAULT_FLOW_LABEL,
+    flow_type: str = "ingestion-api-v2",
+) -> MinimalPublicationModel:
+    """Build and validate the canonical minimal publication model."""
     phases = {
-        phase: canonical_t4_status(phase_statuses.get(phase))
+        phase: canonical_minimal_publication_status(phase_statuses.get(phase))
         for phase in ("phase0", "phase1", "phase2", "phase3", "phase4")
     }
     try:
         safe_byte_count = max(0, int(byte_count))
     except (TypeError, ValueError):
         safe_byte_count = 0
-    model = T4PublicationModel(
+    model = MinimalPublicationModel(
         test_id=str(test_id),
-        public_flow_label=T4_PUBLIC_FLOW_LABEL,
-        flow_type="ingestion-api-v2",
+        public_flow_label=str(public_flow_label or MINIMAL_PUBLICATION_DEFAULT_FLOW_LABEL),
+        flow_type=str(flow_type or "ingestion-api-v2"),
         asset_type=str(asset_type),
         evidence_role=str(evidence_role),
         technical_provider_connector=str(technical_provider_connector),
         technical_consumer_connector=str(technical_consumer_connector),
         phase_statuses=phases,
         technical_status="Validated",
-        download_status=canonical_t4_status(download_status),
+        download_status=canonical_minimal_publication_status(download_status),
         byte_count=safe_byte_count,
         sha256_algorithm="SHA-256",
         sha256_verified=bool(sha256_verified),
-        sha256_value=T4_WITHHELD_HASH,
+        sha256_value=MINIMAL_PUBLICATION_WITHHELD_HASH,
         semantic_validation_status=(
-            canonical_t4_status(semantic_validation_status)
+            canonical_minimal_publication_status(semantic_validation_status)
             if semantic_validation_recorded
-            else T4_NOT_RECORDED
+            else MINIMAL_PUBLICATION_NOT_RECORDED
         ),
         semantic_validation_source=(
             "allowlisted-metadata" if semantic_validation_recorded else "not-recorded"
         ),
-        execution_identifiers=dict(T4_PLACEHOLDER_IDENTIFIERS),
+        execution_identifiers=dict(MINIMAL_PUBLICATION_PLACEHOLDER_IDENTIFIERS),
         payload_included=False,
     )
-    findings = validate_t4_publication_model(model)
+    findings = validate_minimal_publication_model(model)
     if findings:
-        raise ValueError(f"invalid T4 publication model: {findings}")
+        raise ValueError(f"invalid minimal publication model: {findings}")
     return model
 
 
-def validate_t4_publication_model(model: T4PublicationModel) -> List[str]:
+def validate_minimal_publication_model(model: MinimalPublicationModel) -> List[str]:
     findings: List[str] = []
     expected_phases = {"phase0", "phase1", "phase2", "phase3", "phase4"}
     if set(model.phase_statuses) != expected_phases:
         findings.append("phase status inventory differs from canonical phases")
     for phase, status in model.phase_statuses.items():
-        if status not in T4_ALLOWED_STATUSES:
+        if status not in MINIMAL_PUBLICATION_ALLOWED_STATUSES:
             findings.append(f"{phase}: invalid status")
-    if model.download_status not in T4_ALLOWED_STATUSES:
+    if model.download_status not in MINIMAL_PUBLICATION_ALLOWED_STATUSES:
         findings.append("invalid download status")
-    if model.semantic_validation_status not in T4_ALLOWED_STATUSES:
+    if model.semantic_validation_status not in MINIMAL_PUBLICATION_ALLOWED_STATUSES:
         findings.append("invalid semantic validation status")
     if model.byte_count < 0:
         findings.append("byte count must be non-negative")
     if model.technical_status != "Validated":
         findings.append("technical status differs from approved capability label")
-    if model.public_flow_label != T4_PUBLIC_FLOW_LABEL:
-        findings.append("public flow label differs from canonical value")
-    if model.sha256_value != T4_WITHHELD_HASH:
+    if not model.public_flow_label:
+        findings.append("public flow label missing")
+    if model.sha256_value != MINIMAL_PUBLICATION_WITHHELD_HASH:
         findings.append("hash value is not withheld")
-    if model.execution_identifiers != T4_PLACEHOLDER_IDENTIFIERS:
+    if model.execution_identifiers != MINIMAL_PUBLICATION_PLACEHOLDER_IDENTIFIERS:
         findings.append("execution identifiers differ from placeholders")
     if model.payload_included:
         findings.append("payload must be excluded")
@@ -246,23 +342,39 @@ def workbook_cell_snapshot(workbook: Any) -> Dict[str, Dict[str, Any]]:
     }
 
 
-def audit_t4_workbook(
+def audit_minimal_publication_workbook(
     workbook: Any,
     *,
     expected_cells: Dict[str, Dict[str, Any]],
     protected_cells: Optional[Dict[str, Dict[str, Any]]] = None,
-    t4_only: bool,
+    minimal_only: bool,
     canaries: Optional[Iterable[str]] = None,
+    contract: Optional[WorkbookContract] = None,
+    publication_sheets: Optional[Set[str]] = None,
 ) -> List[str]:
-    """Audit workbook object surfaces and exact T4 cell projection."""
+    """Audit workbook object surfaces, cell contracts, and publication projection."""
     findings: List[str] = []
     protected_cells = protected_cells or {}
     actual_snapshot = workbook_cell_snapshot(workbook)
     expected_sheet_names = set(expected_cells)
-    if t4_only and set(actual_snapshot) != expected_sheet_names:
+    if minimal_only and expected_sheet_names and set(actual_snapshot) != expected_sheet_names:
         findings.append(
             f"sheet inventory differs: {sorted(actual_snapshot)} != {sorted(expected_sheet_names)}"
         )
+    publication_sheets = set(publication_sheets or ())
+    if minimal_only and not publication_sheets:
+        publication_sheets = set(actual_snapshot)
+    runtime_coordinates = contract.runtime_coordinates() if contract else {}
+    sanitization_coordinates = (
+        contract.coordinates_by_category(CELL_SANITIZATION_ALLOWED) if contract else {}
+    )
+    contract_coordinates = (
+        {sheet: {entry.coordinate for entry in entries} for sheet, entries in contract.by_sheet().items()}
+        if contract
+        else {}
+    )
+    if contract and not protected_cells:
+        protected_cells = contract.protected_snapshot()
     for worksheet in workbook.worksheets:
         if worksheet.sheet_state != "visible":
             findings.append(f"{worksheet.title}: non-visible sheet")
@@ -287,7 +399,11 @@ def audit_t4_workbook(
                         findings.append(
                             f"{worksheet.title}!{cell.coordinate}: {finding}"
                         )
-                    if PublicationScanner.CANARY_RE.search(cell.value):
+                    scan_publication = (
+                        worksheet.title in publication_sheets
+                        or minimal_only
+                    )
+                    if scan_publication and PublicationScanner.CANARY_RE.search(cell.value):
                         findings.append(
                             f"{worksheet.title}!{cell.coordinate}: generic_canary"
                         )
@@ -299,54 +415,89 @@ def audit_t4_workbook(
     defined_names = list(workbook.defined_names.values())
     if defined_names:
         findings.append("defined names present")
-    for field in ("title", "subject", "creator", "keywords", "description", "category"):
-        value = getattr(workbook.properties, field, None)
+    for field_name in ("title", "subject", "creator", "keywords", "description", "category"):
+        value = getattr(workbook.properties, field_name, None)
         if value:
             for finding in PublicationScanner.findings(str(value), canaries):
-                findings.append(f"property {field}: {finding}")
+                findings.append(f"property {field_name}: {finding}")
             for finding in SecretScanner.text_secret_findings(str(value)):
-                findings.append(f"property {field}: {finding}")
+                findings.append(f"property {field_name}: {finding}")
             for canary in canaries or ():
                 if canary and canary in str(value):
-                    findings.append(f"property {field}: canary:{canary}")
+                    findings.append(f"property {field_name}: canary:{canary}")
     custom_properties = getattr(workbook, "custom_doc_props", ())
     if len(custom_properties):
         findings.append("custom document properties present")
     for sheet_name, cells in expected_cells.items():
         actual = actual_snapshot.get(sheet_name, {})
         for coordinate, value in cells.items():
-            if isinstance(value, str):
+            if isinstance(value, str) and (
+                minimal_only or sheet_name in publication_sheets
+            ):
                 for finding in PublicationScanner.findings(value, canaries):
                     findings.append(f"{sheet_name}!{coordinate}: {finding}")
-        if t4_only:
+        if minimal_only:
             if actual != cells:
-                findings.append(f"{sheet_name}: T4 projection differs from allowlist")
+                findings.append(f"{sheet_name}: publication projection differs from allowlist")
         else:
             for coordinate, value in cells.items():
                 if actual.get(coordinate) != value:
                     findings.append(
-                        f"{sheet_name}!{coordinate}: T4 projection differs from allowlist"
+                        f"{sheet_name}!{coordinate}: publication projection differs from allowlist"
                     )
     for sheet_name, cells in protected_cells.items():
         actual = actual_snapshot.get(sheet_name, {})
+        runtime = runtime_coordinates.get(sheet_name, set())
+        sanitization = sanitization_coordinates.get(sheet_name, set())
+        allowed_change = runtime | sanitization
         for coordinate, value in cells.items():
+            if coordinate in allowed_change:
+                continue
             if actual.get(coordinate) != value:
                 findings.append(f"{sheet_name}!{coordinate}: protected cell changed")
+        contracted = contract_coordinates.get(sheet_name, set())
+        if contracted:
+            continue
         introduced = set(actual) - set(cells) - set(expected_cells.get(sheet_name, {}))
         if introduced:
             findings.append(
                 f"{sheet_name}: unexpected cells introduced: {sorted(introduced)}"
             )
+    if contract:
+        for sheet_name, entries in contract.by_sheet().items():
+            actual = actual_snapshot.get(sheet_name, {})
+            tagged = {entry.coordinate for entry in entries}
+            extra = set(actual) - tagged
+            if extra:
+                findings.append(
+                    f"{sheet_name}: unexpected cells introduced: {sorted(extra)}"
+                )
+            for entry in entries:
+                if entry.category in {
+                    CELL_PROTECTED_STRUCTURE,
+                    CELL_PROTECTED_FORMULA,
+                    CELL_PROTECTED_TEMPLATE_TEXT,
+                } and actual.get(entry.coordinate) != entry.value:
+                    findings.append(
+                        f"{sheet_name}!{entry.coordinate}: {entry.category} changed"
+                    )
+                if entry.category in {
+                    CELL_RUNTIME_POPULATED,
+                    CELL_SANITIZATION_ALLOWED,
+                } and entry.coordinate not in actual:
+                    findings.append(
+                        f"{sheet_name}!{entry.coordinate}: runtime cell missing"
+                    )
     return findings
 
 
-def audit_t4_xlsx_bytes(
+def audit_minimal_publication_xlsx_bytes(
     content: bytes,
     *,
-    t4_sheet_names: Set[str],
+    publication_sheet_names: Set[str],
     canaries: Optional[Iterable[str]] = None,
 ) -> List[str]:
-    """Audit serialized OOXML parts, relationships, and T4 worksheet text."""
+    """Audit serialized OOXML parts, relationships, and publication worksheet text."""
     findings: List[str] = []
     try:
         archive = zipfile.ZipFile(io.BytesIO(content))
@@ -355,8 +506,8 @@ def audit_t4_xlsx_bytes(
     with archive:
         names = {info.filename for info in archive.infolist() if not info.is_dir()}
         for name in sorted(names):
-            if name not in T4_OOXML_ALLOWED_PARTS and not matches_any(
-                name, T4_OOXML_ALLOWED_PART_PATTERNS
+            if name not in MINIMAL_PUBLICATION_OOXML_ALLOWED_PARTS and not matches_any(
+                name, MINIMAL_PUBLICATION_OOXML_ALLOWED_PART_PATTERNS
             ):
                 findings.append(f"unexpected OOXML part: {name}")
             lowered = name.lower()
@@ -410,10 +561,10 @@ def audit_t4_xlsx_bytes(
                 sheet_parts[sheet.attrib.get("name", "")] = part
         except (KeyError, ElementTree.ParseError):
             findings.append("invalid workbook relationship mapping")
-        for sheet_name in t4_sheet_names:
+        for sheet_name in publication_sheet_names:
             part = sheet_parts.get(sheet_name)
             if not part or part not in names:
-                findings.append(f"missing T4 worksheet part: {sheet_name}")
+                findings.append(f"missing publication worksheet part: {sheet_name}")
                 continue
             try:
                 sheet_root = ElementTree.fromstring(archive.read(part))
@@ -458,9 +609,14 @@ def load_test_config(path: Path) -> Dict[str, Any]:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     else:
         data = json.loads(path.read_text(encoding="utf-8"))
-    tests = data.get("tests") or {}
+    tests = data.get("tests") or data.get("slots") or {}
     if not isinstance(tests, dict):
-        raise ValueError("Config field 'tests' must be a mapping")
+        raise ValueError("Config field 'tests' or 'slots' must be a mapping")
+    data["tests"] = tests
+    presets = data.get("presets") or {}
+    if not isinstance(presets, dict):
+        raise ValueError("Config field 'presets' must be a mapping")
+    data["presets"] = presets
     return data
 
 
@@ -484,21 +640,72 @@ def parse_only_tests(value: Optional[str]) -> Set[str]:
     return {item.strip() for item in value.split(",") if item.strip()}
 
 
+def slot_sort_key(test_id: str) -> Tuple[int, str]:
+    if test_id in SLOT_ORDER:
+        return (SLOT_ORDER.index(test_id), test_id)
+    return (len(SLOT_ORDER), test_id)
+
+
+NO_SLOTS_SELECTED_ERROR = (
+    "ERROR: no slots selected. Supply --tests SLOT=SUFFIX "
+    "(exact slot set) or --preset NAME "
+    "(for example --preset legacy_assessment). "
+    "--only-tests only filters an already selected set."
+)
+
+
+def resolve_preset_tests(config: Dict[str, Any], preset_name: str) -> Dict[str, Any]:
+    """Return the exact slot->spec map of a named preset. T* remain slots."""
+    presets = config.get("presets") or {}
+    if not isinstance(presets, dict):
+        raise ValueError("Config field 'presets' must be a mapping")
+    if preset_name not in presets:
+        available = ", ".join(sorted(presets)) or "(none)"
+        raise ValueError(f"Unknown preset '{preset_name}'. Available: {available}")
+    raw_preset = presets[preset_name] or {}
+    if not isinstance(raw_preset, dict):
+        raise ValueError(f"Preset '{preset_name}' must be a mapping")
+    raw_tests = raw_preset.get("tests") or {}
+    if not isinstance(raw_tests, dict):
+        raise ValueError(f"Preset '{preset_name}'.tests must be a mapping")
+    tests: Dict[str, Any] = {}
+    for slot, value in raw_tests.items():
+        if isinstance(value, str):
+            tests[str(slot)] = {"suffix": value}
+        elif isinstance(value, dict):
+            tests[str(slot)] = dict(value)
+        else:
+            raise ValueError(
+                f"Preset '{preset_name}' slot '{slot}' must be a suffix or mapping"
+            )
+    return tests
+
+
 def build_test_specs(
     config: Dict[str, Any],
     overrides: Optional[Dict[str, str]] = None,
     only_tests: Optional[Set[str]] = None,
+    preset: Optional[str] = None,
 ) -> List[TestSpec]:
+    """Build specs from an exact slot set.
+
+    --tests SLOT=SUFFIX is the entire selected set. YAML `tests:` defaults are
+    never merged in. Historical suffixes come only from an explicit --preset.
+    --only-tests filters that selected set; it does not invent slots.
+    """
     overrides = overrides or {}
     only_tests = only_tests or set()
-    specs: List[TestSpec] = []
-    tests = config.get("tests") or {}
-    if overrides and not tests:
+    if overrides:
         tests = {test_id: {"suffix": suffix} for test_id, suffix in overrides.items()}
-    for test_id, raw in tests.items():
+    elif preset:
+        tests = resolve_preset_tests(config, preset)
+    else:
+        tests = {}
+    specs: List[TestSpec] = []
+    for test_id in sorted(tests, key=slot_sort_key):
         if only_tests and test_id not in only_tests:
             continue
-        raw = raw or {}
+        raw = tests.get(test_id) or {}
         suffix = overrides.get(test_id, str(raw.get("suffix", "")))
         if not suffix:
             continue
@@ -705,10 +912,10 @@ def _find_first_value(data: Any, keys: Set[str]) -> Any:
     return None
 
 
-def extract_t4_publication_model(
+def extract_minimal_publication_model(
     loader: EvidenceRunLoader, spec: TestSpec
-) -> T4PublicationModel:
-    """Extract only allowlisted T4 evidence inputs into the shared model."""
+) -> MinimalPublicationModel:
+    """Extract only allowlisted publication evidence inputs into the shared model."""
     parser = loader.parser or SummaryParser(loader.summary)
     manifest = _load_json_object(
         loader.run_dir / "phase4" / "download_manifest.json"
@@ -718,7 +925,7 @@ def extract_t4_publication_model(
     )
     source_hash = _find_first_value(manifest, {"sha256", "sha_256"})
     download_step = parser.get_step("phase4", "save_download") or {}
-    return build_t4_publication_model(
+    return build_minimal_publication_model(
         test_id=spec.test_id,
         asset_type=spec.asset_type,
         evidence_role=spec.evidence_role,
@@ -735,6 +942,12 @@ def extract_t4_publication_model(
         sha256_verified=isinstance(source_hash, str) and bool(source_hash.strip()),
         semantic_validation_status=semantic.get("status"),
         semantic_validation_recorded=bool(semantic),
+        public_flow_label=spec.display_name or MINIMAL_PUBLICATION_DEFAULT_FLOW_LABEL,
+        flow_type=(
+            "ingestion-api-v2"
+            if spec.asset_key in {"", "ingestion_api_v2"}
+            else spec.asset_key
+        ),
     )
 
 

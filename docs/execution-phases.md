@@ -1,5 +1,7 @@
 # Execution Phases
 
+This is a reference document. Copy-and-paste execution from a clean clone is in [workshop.md](workshop.md).
+
 ## Purpose
 
 This document is the canonical definition of the current `phase0` to `phase4` execution model.
@@ -338,7 +340,7 @@ Phase files exchange execution state, not credentials. See [Backend integration]
 
 ## Runnable clean v2 executions
 
-The following blocks are intended to be run from the repository root. They contain no credential values.
+The executable copy/paste path is [workshop.md](workshop.md). The following blocks remain as condensed reference from the repository root. They contain no credential values.
 
 ### Select the resource
 
@@ -451,6 +453,7 @@ This is a known path-centralization gap. Do not copy operation paths from the sc
 
 Flow-specific inputs are documented in:
 
+- [Workshop](workshop.md)
 - [Ingestion API](flows/ingestion-api.md)
 - [WFS](flows/wfs.md)
 - [SPARQL](flows/sparql.md)

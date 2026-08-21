@@ -30,7 +30,7 @@ The checklist does not establish formal KPI or assessment compliance. It verifie
 - [ ] For Ingestion API, the API key and provider identifier can be loaded immediately before phase1 and removed from the environment immediately afterward.
 - [ ] The currently available PRE profile is reachable.
 - [ ] No statement or presentation assumes that PRO/POST has been validated.
-- [ ] Required local tools and a supported Bash version are available as described in [Getting Started](../getting-started.md).
+- [ ] Required local tools and a supported Bash version are available as described in the [workshop](../workshop.md) and [Getting Started](../getting-started.md).
 
 ## Flow readiness
 
@@ -60,22 +60,17 @@ The checklist does not establish formal KPI or assessment compliance. It verifie
 - [ ] Any prepared output is sanitized and approved.
 - [ ] No raw password, API key, JWT, EDR authorization, or credential file is included.
 - [ ] No raw `phase*_env.sh` file is displayed or published.
-- [ ] T1 is described as the delivered CSV/B2 baseline.
-- [ ] T2 is described as delivered WFS evidence.
-- [ ] T3 is described as delivered SPARQL evidence.
-- [ ] T4 is described as additional validated Ingestion API v2 integration.
-- [ ] T4 does not replace or reinterpret T1.
-- [ ] A T4 export uses an explicitly supplied runtime suffix; no T4 run is selected from versioned configuration.
-- [ ] `package_evidence_bundle.py` and `export_evidence_to_excel.py` use the same T4 selection semantics and canonical sanitized model.
-- [ ] A publication-ready T4 bundle uses `--only-tests T4`, a runtime `--tests T4=<suffix>` override, and `--strict`.
-- [ ] The T4 archive contains only the allowlisted summary, manifest metadata, validation status, README, and package inventories.
-- [ ] Every T4 JSON structure passes its field-level allowlist.
-- [ ] A T4-only workbook uses `--only-tests T4`, a runtime `--tests T4=<suffix>` override, and the stable public-safe output name.
-- [ ] The T4-only workbook has five visible sheets and passes the complete in-memory and serialized OOXML audit.
-- [ ] The T4 runtime suffix is absent from workbook cells, names, properties, relationships, and package metadata.
-- [ ] Any mixed T1–T4 bundle or workbook is classified as internal evidence.
-- [ ] No XLSX file has been added to the six-entry T4 publication ZIP allowlist.
-- [ ] The [synthetic T4 example](../../examples/evidence/t4-ingestion-api/README.md) is identified as structural documentation, not raw validation evidence.
+- [ ] T1–T4 are described as presentation slots, not asset types.
+- [ ] The asset in each slot is classified from the run.
+- [ ] CSV/B2 is described as a preserved historical baseline, not the current workshop path.
+- [ ] Ingestion API, WFS city, WFS juntas, and SPARQL are the current workshop assets.
+- [ ] `--tests SLOT=SUFFIX` is used for current packaging; `--only-tests T4` is not the Ingestion API Golden Path.
+- [ ] A COMPLETE example may assign any current asset to any slot.
+- [ ] A SINGLE example may place Ingestion API in a non-T4 slot to demonstrate slot independence.
+- [ ] `publication_ready` is true only when every included slot is `publication_safe`.
+- [ ] A package that includes WFS or SPARQL (`standard`) is classified as internal if intended for external sharing.
+- [ ] Runtime suffixes are used only to locate evidence and do not appear in publication-safe outputs.
+- [ ] The [synthetic evidence example](../../examples/evidence/t4-ingestion-api/README.md) is identified as structural documentation, not raw validation evidence.
 
 ## Presentation readiness
 

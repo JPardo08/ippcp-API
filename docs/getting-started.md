@@ -1,8 +1,10 @@
 # Getting Started
 
+This is a reference document. The executable Golden Path from a clean clone is [workshop.md](workshop.md).
+
 ## Purpose
 
-This guide is the public entry point for running the IPPCP API automation. The repository publishes upstream resources through provider and consumer data-space connectors, negotiates access, obtains an Endpoint Data Reference (EDR), and materializes an authorized local download.
+This guide records setup details, flow selection, and result locations for the IPPCP API automation. The repository publishes upstream resources through provider and consumer data-space connectors, negotiates access, obtains an Endpoint Data Reference (EDR), and materializes an authorized local download.
 
 ## Supported flows
 
@@ -133,7 +135,7 @@ Operations not declared in `endpoints.sh` remain defined in their owning phase s
 
 ## Select a flow
 
-Read the selected flow guide before phase 1:
+The executable copy/paste path is [workshop.md](workshop.md). Read the selected flow reference before treating a custom variation as supported:
 
 - [Run Ingestion API](flows/ingestion-api.md)
 - [Run WFS](flows/wfs.md)
@@ -212,7 +214,11 @@ See [Evidence and traceability](evidence-and-traceability.md) for integrity and 
 
 ## Documentation map
 
-Before execution:
+Executable path:
+
+1. [Workshop](workshop.md)
+
+Before execution, as reference:
 
 1. [Architecture](architecture.md)
 2. [Authentication](authentication.md)

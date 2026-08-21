@@ -1,5 +1,7 @@
 # scripts/ — Automatización API IPPCP
 
+> For current execution, start with [`docs/workshop.md`](../docs/workshop.md).
+>
 > **Referencia avanzada y de compatibilidad**
 >
 > Para una ejecución actual, comienza por [`README.md`](../README.md) y

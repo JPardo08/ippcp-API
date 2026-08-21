@@ -15,7 +15,20 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from evidence_assets import (
+    ClassificationError,
+    classify_loader,
+    is_minimal_profile,
+    load_asset_registry,
+    package_publication_status,
+    slot_inventory_row,
+    validate_classified_run,
+)
 from evidence_common import (
+    CELL_PROTECTED_STRUCTURE,
+    CELL_PROTECTED_TEMPLATE_TEXT,
+    CELL_RUNTIME_POPULATED,
+    CELL_SANITIZATION_ALLOWED,
     ConnectorSanitizer,
     EvidenceRunLoader,
     FileEntry,
@@ -23,15 +36,17 @@ from evidence_common import (
     MINIMAL_PUBLICATION_PROFILE,
     NOT_FOUND,
     SummaryParser,
-    T4PublicationModel,
-    audit_t4_workbook,
-    audit_t4_xlsx_bytes,
+    MinimalPublicationModel,
+    WorkbookContract,
+    audit_minimal_publication_workbook,
+    audit_minimal_publication_xlsx_bytes,
     build_test_specs,
-    extract_t4_publication_model,
+    extract_minimal_publication_model,
     find_repo_root,
     load_test_config,
     parse_only_tests,
     parse_tests_override,
+    NO_SLOTS_SELECTED_ERROR,
     relative_to_repo,
     resolve_repo_path,
     workbook_cell_snapshot,
@@ -40,6 +55,14 @@ from evidence_common import (
 
 SUMMARY_COLUMNS = [
     "test_id",
+    "asset_key",
+    "display_name",
+    "family",
+    "variant",
+    "transport",
+    "critical",
+    "publication_profile",
+    "publication_safe",
     "workflow",
     "asset_type",
     "provider_connector",
@@ -66,6 +89,46 @@ SUMMARY_COLUMNS = [
     "notes",
 ]
 
+SLOT_MAP_COLUMNS = [
+    "slot",
+    "asset",
+    "asset_key",
+    "asset_variant",
+    "family",
+    "variant",
+    "transport",
+    "critical",
+    "publication_profile",
+    "publication_safe",
+    "suffix",
+    "validation_status",
+]
+
+SANITIZATION_FIELD_LABELS = {
+    "provider_connector",
+    "consumer_connector",
+    "technical_provider_connector",
+    "technical_consumer_connector",
+    "asset_config",
+    "download_file",
+    "summary_json",
+    "manifest_json",
+    "file_path",
+    "evidence_file",
+    "artifact",
+}
+
+TABLE_TITLES = {
+    "Datos generales",
+    "IDs principales",
+    "Estado por fase",
+    "Pasos (summary)",
+    "Artefactos por fase",
+    "Manifest",
+    "Notas de interpretación",
+    "Slot identity",
+}
+
 CHECKLIST_REQUIREMENTS = [
     "provider authentication",
     "consumer authentication",
@@ -85,8 +148,18 @@ CHECKLIST_REQUIREMENTS = [
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", help="YAML/JSON config with tests")
-    parser.add_argument("--tests", help="Override tests as T1=SUFFIX,T2=SUFFIX")
-    parser.add_argument("--only-tests", help="Select only these configured test IDs, comma-separated")
+    parser.add_argument(
+        "--tests",
+        help="Exact slot mapping SLOT=SUFFIX,SLOT=SUFFIX. No other slots are added.",
+    )
+    parser.add_argument(
+        "--preset",
+        help="Named historical/canonical slot mapping from config (does not bind assets to slots)",
+    )
+    parser.add_argument(
+        "--only-tests",
+        help="Filter the selected slot set (--tests or --preset) to these IDs, comma-separated",
+    )
     parser.add_argument("--repo-root", help="Repository root")
     parser.add_argument("--evidence-dir", help="Evidence runs directory")
     parser.add_argument("--downloads-dir", help="Downloads directory")
@@ -95,8 +168,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timestamp", help="Timestamp to use for generated names, format YYYYMMDD_HHMMSS")
     parser.add_argument("--timestamp-suffix", action="store_true", help="Append timestamp before .xlsx")
     parser.add_argument("--strict", action="store_true", help="Fail on warnings or incomplete tests")
-    parser.add_argument("--sanitize-connectors", action="store_true", help="Apply connector aliases in output")
-    parser.add_argument("--redact-local-paths", action="store_true", help="Redact absolute repo paths in output")
+    parser.add_argument("--profile", help="Policy profile from config (does not assign assets to slots)")
+    parser.add_argument(
+        "--sanitize-connectors",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Apply connector aliases in output (default: profile/policy)",
+    )
+    parser.add_argument(
+        "--redact-local-paths",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Redact absolute repo paths in output (default: profile/policy)",
+    )
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args()
 
@@ -183,6 +267,14 @@ def build_summary_row(loader: EvidenceRunLoader, spec, repo_root: Path) -> Dict[
 
     row: Dict[str, Any] = {
         "test_id": spec.test_id,
+        "asset_key": spec.asset_key,
+        "display_name": spec.display_name,
+        "family": spec.family,
+        "variant": spec.variant,
+        "transport": spec.transport,
+        "critical": spec.critical,
+        "publication_profile": spec.publication_profile,
+        "publication_safe": spec.publication_safe,
         "workflow": spec.workflow,
         "asset_type": spec.asset_type,
         "provider_connector": spec.provider_connector,
@@ -281,7 +373,7 @@ def first_found(*values: Any) -> Any:
     return NOT_FOUND
 
 
-def t4_execution_outcome(model: T4PublicationModel) -> Tuple[str, str]:
+def minimal_publication_execution_outcome(model: MinimalPublicationModel) -> Tuple[str, str]:
     """Map canonical execution evidence to the compatible Summary outcome."""
     non_ok_phases = [
         phase for phase, status in model.phase_statuses.items() if status != "ok"
@@ -293,11 +385,21 @@ def t4_execution_outcome(model: T4PublicationModel) -> Tuple[str, str]:
     return "PASS", ""
 
 
-def t4_summary_row(model: T4PublicationModel) -> Dict[str, Any]:
+def minimal_publication_summary_row(model: MinimalPublicationModel, spec=None) -> Dict[str, Any]:
     identifiers = model.execution_identifiers
-    overall_status, outcome_note = t4_execution_outcome(model)
+    overall_status, outcome_note = minimal_publication_execution_outcome(model)
     row = {
         "test_id": model.test_id,
+        "asset_key": spec.asset_key if spec else "",
+        "display_name": model.public_flow_label,
+        "family": spec.family if spec else "ingestion",
+        "variant": spec.variant if spec else "api_v2",
+        "transport": spec.transport if spec else "HttpData-PULL",
+        "critical": spec.critical if spec else True,
+        "publication_profile": (
+            spec.publication_profile if spec else MINIMAL_PUBLICATION_PROFILE
+        ),
+        "publication_safe": spec.publication_safe if spec else True,
         "workflow": model.public_flow_label,
         "asset_type": model.asset_type,
         "provider_connector": model.technical_provider_connector,
@@ -318,8 +420,8 @@ def t4_summary_row(model: T4PublicationModel) -> Dict[str, Any]:
         "download_file": model.not_applicable,
         "bytes": model.byte_count,
         "sha256": model.sha256_value,
-        "summary_json": "T4_ingestion_api/sanitized_summary.json",
-        "manifest_json": "T4_ingestion_api/sanitized_manifest.json",
+        "summary_json": f"{(spec.sheet_name if spec else f'{model.test_id}_ingestion_api')}/sanitized_summary.json",
+        "manifest_json": f"{(spec.sheet_name if spec else f'{model.test_id}_ingestion_api')}/sanitized_manifest.json",
         "overall_status": overall_status,
         "notes": (
             f"{model.evidence_role}; "
@@ -330,13 +432,27 @@ def t4_summary_row(model: T4PublicationModel) -> Dict[str, Any]:
     return {column: row[column] for column in SUMMARY_COLUMNS}
 
 
-def append_t4_sheet(workbook: Workbook, spec, model: T4PublicationModel) -> None:
+def append_minimal_publication_sheet(
+    workbook: Workbook,
+    spec,
+    model: MinimalPublicationModel,
+    contract: Optional[WorkbookContract] = None,
+) -> None:
     worksheet = workbook.create_sheet(spec.sheet_name[:31])
     append_table(
         worksheet,
         "Datos generales",
         ["field", "value"],
         [
+            ["slot", spec.test_id],
+            ["asset", spec.display_name or model.public_flow_label],
+            ["asset_key", spec.asset_key],
+            ["family", spec.family],
+            ["variant", spec.variant],
+            ["transport", spec.transport],
+            ["critical", spec.critical],
+            ["publication_profile", spec.publication_profile],
+            ["publication_safe", spec.publication_safe],
             ["test_id", model.test_id],
             ["workflow", model.public_flow_label],
             ["asset_type", model.asset_type],
@@ -345,6 +461,7 @@ def append_t4_sheet(workbook: Workbook, spec, model: T4PublicationModel) -> None
             ["technical_provider_connector", model.technical_provider_connector],
             ["technical_consumer_connector", model.technical_consumer_connector],
         ],
+        contract=contract,
     )
     append_table(
         worksheet,
@@ -352,6 +469,7 @@ def append_t4_sheet(workbook: Workbook, spec, model: T4PublicationModel) -> None
         ["field", "value"],
         [[key, value] for key, value in model.execution_identifiers.items()]
         + [["sha256", model.sha256_value]],
+        contract=contract,
     )
     append_table(
         worksheet,
@@ -361,6 +479,7 @@ def append_t4_sheet(workbook: Workbook, spec, model: T4PublicationModel) -> None
             [phase, status, model.not_recorded, model.not_recorded, model.not_recorded]
             for phase, status in model.phase_statuses.items()
         ],
+        contract=contract,
     )
     append_table(
         worksheet,
@@ -374,6 +493,7 @@ def append_t4_sheet(workbook: Workbook, spec, model: T4PublicationModel) -> None
             ["sha256_value", model.sha256_value],
             ["payload_included", model.payload_included],
         ],
+        contract=contract,
     )
     append_table(
         worksheet,
@@ -384,11 +504,13 @@ def append_t4_sheet(workbook: Workbook, spec, model: T4PublicationModel) -> None
             ["semantic_validation_status", model.semantic_validation_status],
             ["semantic_validation_source", model.semantic_validation_source],
         ],
+        contract=contract,
     )
 
 
-def t4_aggregate_rows(
-    model: T4PublicationModel,
+def minimal_publication_aggregate_rows(
+    model: MinimalPublicationModel,
+    folder: str,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     logical_files = [
         ("sanitized_summary.json", "summary"),
@@ -400,7 +522,7 @@ def t4_aggregate_rows(
             "test_id": model.test_id,
             "suffix": model.execution_identifiers["run_id"],
             "phase": model.not_applicable,
-            "file_path": f"T4_ingestion_api/{file_name}",
+            "file_path": f"{folder}/{file_name}",
             "file_name": file_name,
             "is_sensitive": False,
             "include_in_package": True,
@@ -429,7 +551,7 @@ def t4_aggregate_rows(
             "test_id": model.test_id,
             "requirement": requirement,
             "status": model.phase_statuses[phase],
-            "evidence_file": "T4_ingestion_api/sanitized_summary.json",
+            "evidence_file": f"{folder}/sanitized_summary.json",
             "evidence_step": model.not_recorded,
             "notes": model.evidence_role,
         }
@@ -438,7 +560,7 @@ def t4_aggregate_rows(
     package = [
         {
             "test_id": model.test_id,
-            "file_path": f"T4_ingestion_api/{file_name}",
+            "file_path": f"{folder}/{file_name}",
             "category": "publication_metadata",
             "include_in_package": True,
             "reason": "minimal_publication allowlist",
@@ -456,17 +578,73 @@ def sanitize_value(value: Any, config: Dict[str, Any], repo_root: Path, sanitize
     return ConnectorSanitizer.apply(value, aliases, redact_paths, repo_root)
 
 
-def append_table(ws, title: str, headers: List[str], rows: List[List[Any]]) -> None:
-    if ws.max_row > 1 or ws["A1"].value:
+def _record_contract_cell(
+    contract: Optional[WorkbookContract],
+    sheet: str,
+    coordinate: str,
+    category: str,
+    value: Any,
+    label: str = "",
+) -> None:
+    if contract is None or value in (None, ""):
+        return
+    contract.add(sheet, coordinate, category, value, label)
+
+
+def append_table(
+    ws,
+    title: str,
+    headers: List[str],
+    rows: List[List[Any]],
+    contract: Optional[WorkbookContract] = None,
+) -> None:
+    sheet = ws.title
+    empty = ws.max_row == 1 and ws["A1"].value in (None, "")
+    if empty:
+        ws["A1"] = title
+        title_row = 1
+    else:
         ws.append([])
-    ws.append([title])
-    ws.cell(ws.max_row, 1).font = Font(bold=True, size=12)
+        ws.append([title])
+        title_row = ws.max_row
+    ws.cell(title_row, 1).font = Font(bold=True, size=12)
+    _record_contract_cell(contract, sheet, f"A{title_row}", CELL_PROTECTED_STRUCTURE, title, title)
     ws.append(headers)
-    for cell in ws[ws.max_row]:
+    header_row = ws.max_row
+    for cell in ws[header_row]:
         cell.font = Font(bold=True)
         cell.fill = PatternFill("solid", fgColor="D9EAF7")
+        _record_contract_cell(
+            contract,
+            sheet,
+            cell.coordinate,
+            CELL_PROTECTED_TEMPLATE_TEXT,
+            cell.value,
+            str(cell.value or ""),
+        )
+    field_value_layout = headers[:2] == ["field", "value"]
     for row in rows:
         ws.append(row)
+        data_row = ws.max_row
+        label = str(row[0]) if row else ""
+        for index, value in enumerate(row, 1):
+            coordinate = f"{get_column_letter(index)}{data_row}"
+            if index == 1 and field_value_layout:
+                category = CELL_PROTECTED_TEMPLATE_TEXT
+            elif field_value_layout and index == 2:
+                category = (
+                    CELL_SANITIZATION_ALLOWED
+                    if label in SANITIZATION_FIELD_LABELS
+                    else CELL_RUNTIME_POPULATED
+                )
+            else:
+                header = headers[index - 1] if index <= len(headers) else ""
+                category = (
+                    CELL_SANITIZATION_ALLOWED
+                    if header in SANITIZATION_FIELD_LABELS
+                    else CELL_RUNTIME_POPULATED
+                )
+            _record_contract_cell(contract, sheet, coordinate, category, value, label)
 
 
 def build_phase_rows(parser: SummaryParser) -> List[List[Any]]:
@@ -625,7 +803,7 @@ def apply_workbook_format(wb: Workbook) -> None:
             ws.auto_filter.ref = ws.dimensions
         for row in ws.iter_rows():
             for cell in row:
-                if cell.row == 1 or (isinstance(cell.value, str) and cell.value in {"Datos generales", "IDs principales", "Estado por fase", "Pasos (summary)", "Artefactos por fase", "Manifest", "Notas de interpretación"}):
+                if cell.row == 1 or (isinstance(cell.value, str) and cell.value in TABLE_TITLES):
                     cell.font = Font(bold=True)
                 if isinstance(cell.value, str) and cell.value in status_fills:
                     cell.fill = PatternFill("solid", fgColor=status_fills[cell.value])
@@ -639,13 +817,42 @@ def apply_workbook_format(wb: Workbook) -> None:
             ws.column_dimensions[get_column_letter(col_idx)].width = max_len + 2
 
 
-def write_rows(ws, headers: List[str], rows: List[Dict[str, Any]], config: Dict[str, Any], repo_root: Path, sanitize: bool, redact_paths: bool) -> None:
-    ws.append(headers)
-    for cell in ws[1]:
+def write_rows(
+    ws,
+    headers: List[str],
+    rows: List[Dict[str, Any]],
+    config: Dict[str, Any],
+    repo_root: Path,
+    sanitize: bool,
+    redact_paths: bool,
+    contract: Optional[WorkbookContract] = None,
+) -> None:
+    sheet = ws.title
+    for index, header in enumerate(headers, 1):
+        cell = ws.cell(1, index, header)
         cell.font = Font(bold=True)
         cell.fill = PatternFill("solid", fgColor="D9EAD3")
-    for row in rows:
-        ws.append([sanitize_value(row.get(header, ""), config, repo_root, sanitize, redact_paths) for header in headers])
+        _record_contract_cell(contract, sheet, cell.coordinate, CELL_PROTECTED_TEMPLATE_TEXT, header, header)
+    for row_index, row in enumerate(rows, 2):
+        values = [
+            sanitize_value(row.get(header, ""), config, repo_root, sanitize, redact_paths)
+            for header in headers
+        ]
+        for index, (header, value) in enumerate(zip(headers, values), 1):
+            ws.cell(row_index, index, value)
+            category = (
+                CELL_SANITIZATION_ALLOWED
+                if header in SANITIZATION_FIELD_LABELS
+                else CELL_RUNTIME_POPULATED
+            )
+            _record_contract_cell(
+                contract,
+                sheet,
+                f"{get_column_letter(index)}{row_index}",
+                category,
+                value,
+                header,
+            )
 
 
 def resolve_output_path(
@@ -654,21 +861,12 @@ def resolve_output_path(
     export_dir: Optional[str],
     timestamp: Optional[str],
     timestamp_suffix: bool,
-    t4_only: bool = False,
 ) -> Path:
     ts = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
     if output:
         path = resolve_repo_path(repo_root, output)
     elif export_dir:
-        file_name = (
-            "ippcp_t4_publication.xlsx"
-            if t4_only
-            else f"ippcp_evidence_summary_{ts}.xlsx"
-        )
-        path = resolve_repo_path(repo_root, export_dir) / file_name
-        if t4_only and timestamp_suffix:
-            return path.with_name(f"{path.stem}_{ts}{path.suffix}")
-        return path
+        return resolve_repo_path(repo_root, export_dir) / f"ippcp_evidence_summary_{ts}.xlsx"
     else:
         raise ValueError("--output or --export-dir is required")
     if not timestamp_suffix:
@@ -676,90 +874,155 @@ def resolve_output_path(
     return path.with_name(f"{path.stem}_{ts}{path.suffix}")
 
 
+def _resolve_policy_flags(args, config: Dict[str, Any]) -> Tuple[bool, bool]:
+    defaults = config.get("defaults") or {}
+    profiles = config.get("profiles") or {}
+    profile = profiles.get(args.profile or "default") or {}
+    sanitize = args.sanitize_connectors
+    if sanitize is None:
+        sanitize = bool(profile.get("sanitize_connectors", defaults.get("sanitize_connectors", True)))
+    redact = args.redact_local_paths
+    if redact is None:
+        redact = bool(profile.get("redact_local_paths", defaults.get("redact_local_paths", True)))
+    return sanitize, redact
+
+
+def _public_suffix(spec) -> str:
+    return "<run-id>" if is_minimal_profile(spec) else spec.suffix
+
+
 def main() -> int:
     args = parse_args()
     repo_root = Path(args.repo_root).resolve() if args.repo_root else find_repo_root(Path(__file__).resolve())
     config_path = resolve_repo_path(repo_root, args.config) if args.config else None
-    config = load_test_config(config_path) if config_path else {"tests": {}}
+    config = load_test_config(config_path) if config_path else {"tests": {}, "presets": {}}
     overrides = parse_tests_override(args.tests)
     only_tests = parse_only_tests(args.only_tests)
-    specs = build_test_specs(config, overrides, only_tests)
+    if args.tests and args.preset:
+        print("WARN: --tests takes precedence; --preset is ignored", file=sys.stderr)
+    try:
+        specs = build_test_specs(
+            config,
+            overrides,
+            only_tests,
+            preset=None if overrides else args.preset,
+        )
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     defaults = config.get("defaults") or {}
     evidence_dir = resolve_repo_path(repo_root, args.evidence_dir or defaults.get("evidence_dir") or "evidencias/runs")
     downloads_dir = resolve_repo_path(repo_root, args.downloads_dir or defaults.get("downloads_dir") or "downloads")
     warnings: List[str] = []
+    sanitize_connectors, redact_local_paths = _resolve_policy_flags(args, config)
 
     if not specs:
-        if only_tests:
+        print(NO_SLOTS_SELECTED_ERROR, file=sys.stderr)
+        return 1
+
+    try:
+        registry = load_asset_registry(config)
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    jobs: List[Tuple[Any, EvidenceRunLoader, Any]] = []
+    for spec in specs:
+        loader = EvidenceRunLoader(repo_root, evidence_dir, downloads_dir, spec)
+        if not loader.exists():
+            message = f"{spec.test_id}: missing run summary at {loader.summary_path}"
+            print(f"ERROR: {message}", file=sys.stderr)
+            return 1
+        try:
+            loader.load(include_env=False)
+            loader, spec, _asset = classify_loader(loader, registry)
+        except ClassificationError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        except Exception as exc:
+            print(f"ERROR: {spec.test_id}: cannot load evidence: {exc}", file=sys.stderr)
+            return 1
+        if not is_minimal_profile(spec):
+            loader.env = loader.load_env_files()
+        validation = validate_classified_run(loader, spec)
+        if args.strict and not validation.ok:
             print(
-                "ERROR: selected tests have no configured or runtime suffix; "
-                "supply --tests TEST_ID=SUFFIX",
+                f"ERROR: {spec.test_id}: semantic validation failed: {', '.join(validation.findings)}",
                 file=sys.stderr,
             )
-        else:
-            print("ERROR: no tests configured", file=sys.stderr)
-        return 1
-    minimal_specs = [
-        spec for spec in specs
-        if spec.publication_profile == MINIMAL_PUBLICATION_PROFILE
-    ]
-    delivery_specs = [
-        spec for spec in specs
-        if spec.publication_profile != MINIMAL_PUBLICATION_PROFILE
-    ]
-    t4_only = bool(minimal_specs) and not delivery_specs
-    if minimal_specs and delivery_specs:
-        warn(
-            "minimal_publication T4 is mixed with delivery profiles; "
-            "the workbook is internal and not publication-ready",
-            warnings,
-            True,
-        )
-
-    for spec in specs:
+            return 1
         for message in ConnectorSanitizer.validate_workflow_roles(spec, config):
             warn(message, warnings, args.verbose)
+        jobs.append((spec, loader, validation))
+
+    minimal_specs = [spec for spec, _, _ in jobs if is_minimal_profile(spec)]
+    delivery_specs = [spec for spec, _, _ in jobs if not is_minimal_profile(spec)]
+    minimal_only = bool(minimal_specs) and not delivery_specs
+    publication = package_publication_status([spec for spec, _, _ in jobs])
+    print(f"package.publication_ready={str(publication['publication_ready']).lower()}")
+    if publication["publication_blockers"]:
+        print("package.publication_blockers:", file=sys.stderr)
+        for blocker in publication["publication_blockers"]:
+            print(f"  {blocker}", file=sys.stderr)
 
     wb = Workbook()
     wb.remove(wb.active)
+    contract = WorkbookContract()
     summary_rows: List[Dict[str, Any]] = []
+    slot_rows: List[Dict[str, Any]] = []
     raw_index_rows: List[Dict[str, Any]] = []
     checklist_all: List[Dict[str, Any]] = []
     package_rows: List[Dict[str, Any]] = []
     indexer = FileIndexer(repo_root)
+    publication_sheets = set()
 
-    for spec in delivery_specs:
-        loader = EvidenceRunLoader(repo_root, evidence_dir, downloads_dir, spec)
-        if not loader.exists():
-            message = f"{spec.test_id}: missing run summary at {loader.summary_path}"
-            warn(message, warnings, True)
-            if args.strict:
-                continue
-            summary_rows.append({column: NOT_FOUND for column in SUMMARY_COLUMNS} | {"test_id": spec.test_id, "suffix": spec.suffix, "overall_status": "INCOMPLETE", "notes": message})
-            continue
-        try:
-            loader.load()
-        except Exception as exc:
-            message = f"{spec.test_id}: cannot load evidence: {exc}"
-            warn(message, warnings, True)
-            if args.strict:
-                continue
-            summary_rows.append({column: NOT_FOUND for column in SUMMARY_COLUMNS} | {"test_id": spec.test_id, "suffix": spec.suffix, "overall_status": "FAIL", "notes": message})
-            continue
-        if str(loader.summary.get("suffix")) != spec.suffix:
-            warn(f"{spec.test_id}: summary suffix differs from config suffix", warnings, args.verbose)
+    for spec, loader, validation in jobs:
         parser = loader.parser or SummaryParser(loader.summary)
+        if is_minimal_profile(spec):
+            try:
+                model = extract_minimal_publication_model(loader, spec)
+            except Exception as exc:
+                print(f"ERROR: {spec.test_id}: cannot build publication model: {exc}", file=sys.stderr)
+                return 1
+            if validation.status != "not_recorded":
+                # Keep the public projection allowlisted; record validator in notes only.
+                pass
+            row = minimal_publication_summary_row(model, spec)
+            summary_rows.append(row)
+            publication_raw, publication_checklist, publication_package = minimal_publication_aggregate_rows(model, spec.sheet_name[:31])
+            raw_index_rows.extend(publication_raw)
+            checklist_all.extend(publication_checklist)
+            package_rows.extend(publication_package)
+            append_minimal_publication_sheet(wb, spec, model, contract=contract)
+            publication_sheets.add(spec.sheet_name[:31])
+            slot_rows.append(
+                slot_inventory_row(spec, suffix_value=_public_suffix(spec), validation=validation)
+            )
+            continue
+
         entries = indexer.collect(loader.run_dir, spec, parser)
         row = build_summary_row(loader, spec, repo_root)
+        if validation.findings:
+            note = row.get("notes") or ""
+            extra = f"semantic_validation={validation.status}"
+            row["notes"] = f"{note}; {extra}".strip("; ")
         summary_rows.append(row)
-
         ws = wb.create_sheet(spec.sheet_name[:31])
         append_table(
             ws,
             "Datos generales",
             ["field", "value"],
             [
-                ["test_id", spec.test_id],
+                ["slot", spec.test_id],
+                ["asset", spec.display_name],
+                ["asset_key", spec.asset_key],
+                ["family", spec.family],
+                ["variant", spec.variant],
+                ["transport", spec.transport],
+            ["critical", spec.critical],
+            ["publication_profile", spec.publication_profile],
+            ["publication_safe", spec.publication_safe],
+            ["test_id", spec.test_id],
                 ["workflow", spec.workflow],
                 ["asset_type", spec.asset_type],
                 ["asset_config", spec.asset_config],
@@ -768,14 +1031,26 @@ def main() -> int:
                 ["provider_connector", spec.provider_connector],
                 ["consumer_connector", spec.consumer_connector],
             ],
+            contract=contract,
         )
-        append_table(ws, "IDs principales", ["field", "value"], [[key, row[key]] for key in SUMMARY_COLUMNS if key.endswith("_id") or key in {"asset_id", "sha256"}])
-        append_table(ws, "Estado por fase", ["phase", "status", "step_count", "first_ts", "last_ts"], build_phase_rows(parser))
-        append_table(ws, "Pasos (summary)", ["phase", "step_id", "status", "ts", "http", "metadata"], build_step_rows(parser))
-        append_table(ws, "Artefactos por fase", ["phase", "artifact", "http_status", "related_step", "description"], build_artifact_rows(entries))
-        append_table(ws, "Manifest", ["field", "value"], build_manifest_rows(loader))
-        append_table(ws, "Notas de interpretación", ["field", "value"], [["overall_status", row["overall_status"]], ["notes", row["notes"]]])
-
+        append_table(
+            ws,
+            "IDs principales",
+            ["field", "value"],
+            [[key, row[key]] for key in SUMMARY_COLUMNS if key.endswith("_id") or key in {"asset_id", "sha256"}],
+            contract=contract,
+        )
+        append_table(ws, "Estado por fase", ["phase", "status", "step_count", "first_ts", "last_ts"], build_phase_rows(parser), contract=contract)
+        append_table(ws, "Pasos (summary)", ["phase", "step_id", "status", "ts", "http", "metadata"], build_step_rows(parser), contract=contract)
+        append_table(ws, "Artefactos por fase", ["phase", "artifact", "http_status", "related_step", "description"], build_artifact_rows(entries), contract=contract)
+        append_table(ws, "Manifest", ["field", "value"], build_manifest_rows(loader), contract=contract)
+        append_table(
+            ws,
+            "Notas de interpretación",
+            ["field", "value"],
+            [["overall_status", row["overall_status"]], ["notes", row["notes"]]],
+            contract=contract,
+        )
         for entry in entries:
             raw_index_rows.append(
                 {
@@ -793,9 +1068,14 @@ def main() -> int:
             )
         checklist_all.extend(checklist_rows(loader, spec, row))
         package_rows.extend(package_manifest_rows(entries, loader))
+        slot_rows.append(
+            slot_inventory_row(spec, suffix_value=_public_suffix(spec), validation=validation)
+        )
 
-    ws_summary = wb.create_sheet("Summary", 0)
-    write_rows(ws_summary, SUMMARY_COLUMNS, summary_rows, config, repo_root, args.sanitize_connectors, args.redact_local_paths)
+    ws_slots = wb.create_sheet("Slot Map", 0)
+    write_rows(ws_slots, SLOT_MAP_COLUMNS, slot_rows, config, repo_root, sanitize_connectors, redact_local_paths, contract=contract)
+    ws_summary = wb.create_sheet("Summary", 1)
+    write_rows(ws_summary, SUMMARY_COLUMNS, summary_rows, config, repo_root, sanitize_connectors, redact_local_paths, contract=contract)
     ws_raw = wb.create_sheet("Raw JSON Index")
     write_rows(
         ws_raw,
@@ -803,119 +1083,65 @@ def main() -> int:
         raw_index_rows,
         config,
         repo_root,
-        args.sanitize_connectors,
-        args.redact_local_paths,
+        sanitize_connectors,
+        redact_local_paths,
+        contract=contract,
     )
     ws_check = wb.create_sheet("Evidence Checklist")
-    write_rows(ws_check, ["test_id", "requirement", "status", "evidence_file", "evidence_step", "notes"], checklist_all, config, repo_root, args.sanitize_connectors, args.redact_local_paths)
+    write_rows(ws_check, ["test_id", "requirement", "status", "evidence_file", "evidence_step", "notes"], checklist_all, config, repo_root, sanitize_connectors, redact_local_paths, contract=contract)
     ws_package = wb.create_sheet("Package Manifest")
-    write_rows(ws_package, ["test_id", "file_path", "category", "include_in_package", "reason", "size_bytes"], package_rows, config, repo_root, args.sanitize_connectors, args.redact_local_paths)
-
-    protected_cells = workbook_cell_snapshot(wb)
-    for spec in minimal_specs:
-        loader = EvidenceRunLoader(repo_root, evidence_dir, downloads_dir, spec)
-        if not loader.exists():
-            print(
-                f"ERROR: {spec.test_id}: missing run summary",
-                file=sys.stderr,
-            )
-            return 1
-        try:
-            loader.load(include_env=False)
-            model = extract_t4_publication_model(loader, spec)
-        except Exception as exc:
-            print(
-                f"ERROR: {spec.test_id}: cannot build publication model: {exc}",
-                file=sys.stderr,
-            )
-            return 1
-        row = t4_summary_row(model)
-        summary_rows.append(row)
-        ws_summary.append([row[column] for column in SUMMARY_COLUMNS])
-        t4_raw, t4_checklist, t4_package = t4_aggregate_rows(model)
-        for aggregate_row in t4_raw:
-            ws_raw.append(
-                [
-                    aggregate_row[header]
-                    for header in (
-                        "test_id", "suffix", "phase", "file_path", "file_name",
-                        "is_sensitive", "include_in_package", "description",
-                        "http_status_file", "related_step",
-                    )
-                ]
-            )
-        for aggregate_row in t4_checklist:
-            ws_check.append(
-                [
-                    aggregate_row[header]
-                    for header in (
-                        "test_id", "requirement", "status", "evidence_file",
-                        "evidence_step", "notes",
-                    )
-                ]
-            )
-        for aggregate_row in t4_package:
-            ws_package.append(
-                [
-                    aggregate_row[header]
-                    for header in (
-                        "test_id", "file_path", "category",
-                        "include_in_package", "reason", "size_bytes",
-                    )
-                ]
-            )
-        append_t4_sheet(wb, spec, model)
+    write_rows(ws_package, ["test_id", "file_path", "category", "include_in_package", "reason", "size_bytes"], package_rows, config, repo_root, sanitize_connectors, redact_local_paths, contract=contract)
 
     for ws in wb.worksheets:
         for row in ws.iter_rows():
             for cell in row:
-                cell.value = sanitize_value(cell.value, config, repo_root, args.sanitize_connectors, args.redact_local_paths)
+                if cell.value in (None, "") or not isinstance(cell.value, str):
+                    continue
+                new_value = sanitize_value(
+                    cell.value, config, repo_root, sanitize_connectors, redact_local_paths
+                )
+                if new_value != cell.value:
+                    cell.value = new_value
 
     apply_workbook_format(wb)
     final_cells = workbook_cell_snapshot(wb)
-    if t4_only:
-        expected_t4_cells = final_cells
+    expected_publication_cells: Dict[str, Dict[str, Any]] = {}
+    if minimal_only:
+        expected_publication_cells = final_cells
     else:
-        expected_t4_cells = {}
-        for sheet_name, cells in final_cells.items():
-            original = protected_cells.get(sheet_name, {})
-            additions = {
-                coordinate: value
-                for coordinate, value in cells.items()
-                if coordinate not in original
-            }
-            if additions:
-                expected_t4_cells[sheet_name] = additions
+        for spec in minimal_specs:
+            sheet_name = spec.sheet_name[:31]
+            expected_publication_cells[sheet_name] = final_cells.get(sheet_name, {})
 
-    audit_findings = audit_t4_workbook(
+    audit_findings = audit_minimal_publication_workbook(
         wb,
-        expected_cells=expected_t4_cells,
-        protected_cells={} if t4_only else protected_cells,
-        t4_only=t4_only,
+        expected_cells=expected_publication_cells,
+        protected_cells={},
+        minimal_only=minimal_only,
+        contract=contract,
+        publication_sheets=publication_sheets if not minimal_only else set(final_cells),
     )
     output_buffer = io.BytesIO()
     if not audit_findings:
         wb.save(output_buffer)
         serialized = output_buffer.getvalue()
-        t4_serialized_sheets = (
-            set(final_cells)
-            if t4_only
-            else {spec.sheet_name[:31] for spec in minimal_specs}
-        )
+        publication_serialized_sheets = set(final_cells) if minimal_only else set(publication_sheets)
         audit_findings.extend(
-            audit_t4_xlsx_bytes(
+            audit_minimal_publication_xlsx_bytes(
                 serialized,
-                t4_sheet_names=t4_serialized_sheets,
+                publication_sheet_names=publication_serialized_sheets,
             )
         )
         if not audit_findings:
             loaded = load_workbook(io.BytesIO(serialized), data_only=False)
             audit_findings.extend(
-                audit_t4_workbook(
+                audit_minimal_publication_workbook(
                     loaded,
-                    expected_cells=expected_t4_cells,
-                    protected_cells={} if t4_only else protected_cells,
-                    t4_only=t4_only,
+                    expected_cells=expected_publication_cells,
+                    protected_cells={},
+                    minimal_only=minimal_only,
+                    contract=contract,
+                    publication_sheets=publication_sheets if not minimal_only else set(final_cells),
                 )
             )
 
@@ -925,10 +1151,9 @@ def main() -> int:
         args.export_dir,
         args.timestamp,
         args.timestamp_suffix,
-        t4_only=t4_only,
     )
     if minimal_specs and any(spec.suffix in out.name for spec in minimal_specs):
-        audit_findings.append("runtime T4 suffix appears in output filename")
+        audit_findings.append("runtime suffix of a minimal_publication slot appears in output filename")
     if audit_findings:
         if out.exists():
             out.unlink()
@@ -938,13 +1163,13 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(output_buffer.getvalue())
     print(f"Excel written: {relative_to_repo(repo_root, out)}")
-    if t4_only:
+    if minimal_only:
         print(
-            "T4 workbook passed the full audit; manual review is required "
+            "minimal_publication workbook passed the full audit; manual review is required "
             "before publication"
         )
     for row in summary_rows:
-        print(f"{row.get('test_id')}: {row.get('overall_status')} ({row.get('suffix')})")
+        print(f"{row.get('test_id')}: {row.get('overall_status')} ({row.get('suffix')}) {row.get('asset_key')}")
 
     if args.strict and warnings:
         return 1
@@ -953,3 +1178,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

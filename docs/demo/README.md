@@ -13,6 +13,7 @@ This package supports public-safe explanation, preparation, and demonstration of
 
 ## Canonical references
 
+- [Workshop](../workshop.md)
 - [Architecture](../architecture.md)
 - [Getting Started](../getting-started.md)
 - [Authentication](../authentication.md)
@@ -34,7 +35,7 @@ This package supports public-safe explanation, preparation, and demonstration of
 - **Delivered baseline:** accepted delivery evidence retained with its original meaning.
 - **Out of current scope:** not claimed by the current validated package.
 
-Technical status and evidence role are separate. T1 remains the delivered CSV/B2 baseline, while T4 is additional Ingestion API v2 validation and does not replace T1.
+Technical status and evidence role are separate. T1–T4 are presentation slots. CSV/B2 remains a preserved historical baseline; it is not the current workshop path.
 
 ## Public-safety boundary
 

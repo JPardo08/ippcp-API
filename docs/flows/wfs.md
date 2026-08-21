@@ -1,5 +1,7 @@
 # WFS Flow
 
+This is a flow-specific reference. The executable Golden Path is [workshop.md](../workshop.md).
+
 ## Purpose
 
 This guide defines the current WFS flow-specific configuration and operator checks. The common lifecycle is defined in [Execution phases](../execution-phases.md).
@@ -231,6 +233,7 @@ If the run-specific target already exists with different content, phase 4 fails 
 
 ## Related documentation
 
+- [Workshop](../workshop.md)
 - [Architecture](../architecture.md)
 - [Authentication](../authentication.md)
 - [Execution phases](../execution-phases.md)

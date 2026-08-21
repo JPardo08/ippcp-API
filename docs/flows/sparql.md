@@ -1,5 +1,7 @@
 # SPARQL Flow
 
+This is a flow-specific reference. The executable Golden Path is [workshop.md](../workshop.md).
+
 ## Purpose
 
 This guide defines the current SPARQL flow-specific configuration and operator checks. The common lifecycle is defined in [Execution phases](../execution-phases.md).
@@ -216,6 +218,7 @@ The legacy configuration remains in the repository for reproducibility; this gui
 
 ## Related documentation
 
+- [Workshop](../workshop.md)
 - [Architecture](../architecture.md)
 - [Authentication](../authentication.md)
 - [Execution phases](../execution-phases.md)

@@ -1,5 +1,7 @@
 # Evidence and Traceability
 
+This is a reference document. Practical evidence commands from a completed workshop run are in [workshop.md](workshop.md).
+
 ## Purpose
 
 This document is the canonical source for run identification, generated artifacts, manifests, and evidence safety.
@@ -228,98 +230,43 @@ The scripts write the manifest to:
 
 The SHA-256 value binds the manifest to the materialized bytes. Matching hashes prove byte-for-byte equality between compared files; they do not independently prove source authenticity or authorization.
 
-## Delivered and additional validation evidence
+## Evidence slots and asset classification
 
-The evidence labels describe delivered test baselines and additional validation. They do not redefine the recommended architecture.
+T1, T2, T3, and T4 are presentation slots. They are not asset types.
 
-| Test | Evidence meaning | Status |
-| --- | --- | --- |
-| T1 | CSV-based ingestion through the B2/InesDataStore flow | Delivered baseline evidence; preserved, not recommended for new integration |
-| T2 | WFS data exchange | Delivered evidence |
-| T3 | SPARQL data exchange | Delivered evidence |
-| T4 | Ingestion API `v2` through `HttpData-PULL`, `X-Api-Key`, and `X-Provider-Id` | Additional validated integration |
-
-T4 does not replace, reinterpret, or relabel T1. T1 remains the delivered CSV-based baseline.
-
-The current evidence export configuration supports T1, T2, and T3 with their existing delivery behavior. It also registers T4 as an optional `minimal_publication` profile. T4 is not selected by default and is not delivered assessment evidence.
-
-### Why T4 uses a separate profile
-
-T1 is the delivered CSV-based ingestion baseline, while T2 and T3 are the delivered WFS and SPARQL evidence flows. T4 validates a different protected integration: the Ingestion API through `HttpData-PULL`.
-
-The Ingestion API is not an unauthenticated public endpoint. Provider Data Plane access to the upstream API requires provider-side `X-Api-Key` and `X-Provider-Id` values. These operational values remain inside the provider boundary. They are invisible to the consumer, are not propagated through the EDR, and must never enter an evidence package, workbook, or public example. The evidence tools do not obtain or transport the API key.
-
-T4 therefore uses the shared `minimal_publication` model, strict field and artifact allowlists, and separate sanitized-output rules. This separation reflects a stricter security and publication boundary; it does not make T4 less valid, secondary, or experimental.
-
-Mixed T1–T4 outputs remain internal because T1–T3 intentionally preserve identifiers, paths, and hashes from the delivered evidence process.
-
-## T4 evidence export
-
-### Shared runtime selection
-
-The versioned T4 profile has an empty suffix. The exporter never guesses a run and never selects a T4 evidence directory automatically.
-
-Both `package_evidence_bundle.py` and `export_evidence_to_excel.py` use the same selection behavior:
-
-- default invocation: T1, T2, and T3 only;
-- `--only-tests T4` without a runtime suffix: fails before reading evidence;
-- `--only-tests T4 --tests T4=<runtime-suffix>`: T4 only;
-- `--tests T4=<runtime-suffix>` without `--only-tests`: T1 through T4, preserving the existing override semantics.
-
-The suffix is internal operational input used only to locate evidence. It is replaced by placeholders and must not appear in T4 cells, filenames, properties, relationships, package manifests, or public inventories.
-
-### Sanitized T4 bundle
-
-Generate a T4-only bundle with:
-
-```bash
-: "${T4_SUFFIX:?Set T4_SUFFIX to the local T4 runtime suffix}"
-
-python3 tools/package_evidence_bundle.py \
-  --config tools/evidence_export.tests.yaml \
-  --only-tests T4 \
-  --tests "T4=${T4_SUFFIX}" \
-  --output reports/exports/t4/ippcp_t4_publication.zip \
-  --strict
+```text
+run  ->  asset classification
+asset  ->  critical / publication_profile / publication_safe
 ```
 
-The T4 ZIP contains only:
+`--tests SLOT=SUFFIX` selects exactly those slots. The tool classifies each run from `summary.json`, asset metadata, phases, transfer type, and media type. Slot order is arbitrary.
 
-- `README_PACKAGE.txt`;
-- `package_manifest.json`;
-- `package_manifest.csv`;
-- `T4_ingestion_api/sanitized_summary.json`;
-- `T4_ingestion_api/sanitized_manifest.json`;
-- `T4_ingestion_api/validation_status.json`.
+Do not treat T1 as CSV, T2 as WFS, T3 as SPARQL, or T4 as Ingestion API. A COMPLETE example may place Ingestion API in T1 and SPARQL in T4; a SINGLE example may place Ingestion API in T3. `--only-tests` is a compatibility filter. It does not invent slots and is not the Golden Path for Ingestion API.
 
-The profile constructs these structures from field allowlists. It does not copy full source objects. The T4-only bundle is eligible for publication after manual review. A mixed T1–T4 bundle is internal and strict publication mode may reject it.
+Historical delivered assessment evidence is selected with `--preset legacy_assessment`. That preset still occupies slots; assets are classified from each run. CSV/B2 remains a preserved baseline and is not the current workshop path.
 
-### Sanitized T4 workbook
+### Publication profiles
 
-Generate a T4-only workbook with:
+Publication policy is a property of the classified asset, not of the slot id:
 
-```bash
-: "${T4_SUFFIX:?Set T4_SUFFIX to the local T4 runtime suffix}"
+- `minimal_publication` → `publication_safe=true` (current Ingestion API v2 asset);
+- `standard` → `publication_safe=false` (current WFS, SPARQL, and legacy CSV/B2 assets).
 
-python3 tools/export_evidence_to_excel.py \
-  --config tools/evidence_export.tests.yaml \
-  --only-tests T4 \
-  --tests "T4=${T4_SUFFIX}" \
-  --export-dir reports/exports/t4 \
-  --strict
+```text
+package.publication_ready = all included slots are publication_safe
 ```
 
-The stable output name is `ippcp_t4_publication.xlsx`. It contains `Summary`, `Raw JSON Index`, `Evidence Checklist`, `Package Manifest`, and `T4_ingestion_api`. T4 uses the existing workbook columns where applicable and uses `not_recorded` or `not_applicable` where delivery-only fields cannot be published.
+The Ingestion API is not an unauthenticated public endpoint. Provider Data Plane access to the upstream API requires provider-side `X-Api-Key` and `X-Provider-Id` values. These operational values remain inside the provider boundary. They are invisible to the consumer, are not propagated through the EDR, and must never enter an evidence package, workbook, or public example.
 
-The workbook and bundle project the same canonical allowlisted T4 model. The workbook adds no raw evidence fields. It is eligible for publication only after its automated OOXML audit succeeds and the workbook passes manual review.
+A package that includes any `standard` asset is not publication-ready. A SINGLE package that includes only the Ingestion API v2 asset can be publication-ready after review.
 
-Using `--tests T4=<runtime-suffix>` without `--only-tests` creates an eight-sheet mixed T1–T4 workbook. That workbook is internal because T1–T3 intentionally retain delivery suffixes, identifiers, paths, and hashes. It is not a fully public-safe artifact.
+Operator commands: [workshop.md](workshop.md). Tool semantics: [tools/evidence_tooling.md](../tools/evidence_tooling.md) and [tools/tools_README.md](../tools/tools_README.md).
 
 ### Shared exclusions
 
-If an allowlisted semantic-validation metadata file is not present, `validation_status.json` reports `not_recorded`. The exporter does not inspect the downloaded payload or infer semantic success from phase4 completion.
+If an allowlisted semantic-validation metadata file is not present, `validation_status.json` reports `not_recorded`. The exporter does not inspect the downloaded payload or infer semantic success from phase 4 completion.
 
-The profile excludes:
+The `minimal_publication` profile excludes:
 
 - downloaded payloads and previews;
 - phase environment files;
@@ -333,7 +280,7 @@ The profile excludes:
 
 The source payload SHA-256 value is withheld by default. The sanitized manifest retains the algorithm and verification metadata. Publication of a real hash requires the approval defined in the [Evidence Publication Policy](evidence-publication.md).
 
-A generated structural example is available under [Synthetic T4 evidence example](../examples/evidence/t4-ingestion-api/README.md). It was produced from a synthetic fixture and is not raw output from the validated PRE run.
+A generated structural example is available under [Synthetic evidence example](../examples/evidence/t4-ingestion-api/README.md). It was produced from a synthetic fixture and is not raw output from a validated PRE run. The directory name is historical; current tooling names archive entries `{SLOT}_{sheet_slug}`.
 
 ## Internal and publishable evidence
 
@@ -415,6 +362,7 @@ Before treating a run as complete:
 
 ## Related documentation
 
+- [Workshop](workshop.md)
 - [Evidence Publication Policy](evidence-publication.md)
 - [Execution phases](execution-phases.md)
 - [Backend integration](backend-integration.md)
