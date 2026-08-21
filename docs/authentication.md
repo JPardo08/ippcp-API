@@ -1,5 +1,7 @@
 # Authentication
 
+This is a reference document. Local credential setup for a clean clone is in [workshop.md](workshop.md).
+
 ## Purpose
 
 This document is the canonical source for authentication and secret-handling rules in the current IPPCP flows.

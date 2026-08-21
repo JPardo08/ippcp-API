@@ -122,7 +122,7 @@ State the selected dataspace profile, the chosen flow, and `IPPCP_FLOW_VERSION=v
 
 ### 3. Verify environment readiness
 
-Confirm the prerequisites in [Getting Started](../getting-started.md) and complete the [Readiness checklist](readiness-checklist.md). Verify that provider, consumer, and any flow-specific secrets are available through ignored local files.
+Confirm the prerequisites in the [workshop](../workshop.md) and [Getting Started](../getting-started.md) and complete the [Readiness checklist](readiness-checklist.md). Verify that provider, consumer, and any flow-specific secrets are available through ignored local files.
 
 ### 4. Execute phase0
 

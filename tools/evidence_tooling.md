@@ -4,6 +4,8 @@ CLI entry point: [`tools_README.md`](tools_README.md). Traceability: [`../docs/e
 
 T1, T2, T3 and T4 are slot positions. The asset in each slot is classified from the run.
 
+Executable workshop commands: [docs/workshop.md](../docs/workshop.md).
+
 ## Slot selection
 
 `--tests` is an exact slot set. No YAML suffixes are merged in.
@@ -62,14 +64,14 @@ COMPLETE four slots:
 ```bash
 python3 tools/export_evidence_to_excel.py \
   --config tools/evidence_export.tests.yaml \
-  --tests "T1=$INGESTION_SUFFIX,T2=$WFS_JUNTAS_SUFFIX,T3=$WFS_CIUDAD_SUFFIX,T4=$SPARQL_SUFFIX" \
+  --tests "T1=$INGESTION_SUFFIX,T2=$WFS_JUNTAS_SUFFIX,T3=$WFS_CITY_SUFFIX,T4=$SPARQL_SUFFIX" \
   --timestamp "$TS" \
   --export-dir "$EXPORT_DIR" \
   --strict
 
 python3 tools/package_evidence_bundle.py \
   --config tools/evidence_export.tests.yaml \
-  --tests "T1=$INGESTION_SUFFIX,T2=$WFS_JUNTAS_SUFFIX,T3=$WFS_CIUDAD_SUFFIX,T4=$SPARQL_SUFFIX" \
+  --tests "T1=$INGESTION_SUFFIX,T2=$WFS_JUNTAS_SUFFIX,T3=$WFS_CITY_SUFFIX,T4=$SPARQL_SUFFIX" \
   --excel "$WORKBOOK" \
   --timestamp "$TS" \
   --export-dir "$EXPORT_DIR" \

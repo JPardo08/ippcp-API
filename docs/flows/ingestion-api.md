@@ -1,5 +1,7 @@
 # Ingestion API Flow
 
+This is a flow-specific reference. The executable Golden Path is [workshop.md](../workshop.md).
+
 ## Purpose
 
 This guide defines the current Ingestion API flow-specific configuration and operator checks. The common lifecycle is defined in [Execution phases](../execution-phases.md), and credential ownership is defined in [Authentication](../authentication.md).
@@ -88,13 +90,11 @@ See [Authentication](../authentication.md) for the complete boundary and persist
 
 ### Evidence-profile rationale
 
-This protected upstream boundary is why Ingestion API v2 uses a separate evidence publication profile. The asset `ingestion_api_v2` is classified from the run and uses `publication_profile=minimal_publication` in any slot. That profile does not belong to T4. CSV/B2/InesDataStore remains a legacy historical baseline; it is not replaced by this flow.
+T1–T4 are presentation slots, not asset types. The evidence tools classify each run and apply that asset's `publication_profile`. The current Ingestion API v2 asset uses `minimal_publication` (`publication_safe=true`). WFS, SPARQL, and the historical CSV/B2 baseline currently use `standard` (`publication_safe=false`).
 
 The provider-side `X-Api-Key` and `X-Provider-Id` values stay inside the provider boundary. They are not public values, are not sent to the consumer, are not propagated through the EDR, and are not dynamically obtained by the evidence tools. They must not appear in evidence packages, workbooks, or public examples.
 
-The exporter therefore projects only the shared `minimal_publication` model through strict allowlists and sanitized-output rules. This reflects a stricter security and publication boundary, not lower validity or experimental status. Packages that also include `standard` WFS/SPARQL slots remain internal (`publication_ready=false`) and must not be sent externally.
-
-See [Evidence and traceability](../evidence-and-traceability.md), the [Evidence Publication Policy](../evidence-publication.md), and the [evidence export CLI](../../tools/tools_README.md) for the export boundary.
+See [workshop.md](../workshop.md), [Evidence and traceability](../evidence-and-traceability.md), and the [Evidence Publication Policy](../evidence-publication.md) for the export boundary.
 
 ## Phase 1 behavior
 
@@ -129,7 +129,7 @@ run_ingestion_preflight
 unset -f run_ingestion_preflight
 ```
 
-The preflight succeeds only when the response is HTTP 200, non-empty, and valid JSON. Unconfirmed query-parameter experiments are excluded from the public flow.
+The preflight succeeds only when the response is HTTP 200, non-empty, and valid JSON. The `curl_ingesta_api_pull_pre_limit10.sh` script is an optional parameter experiment; it is not required by the EdD flow.
 
 ## Current v2 execution
 
@@ -248,14 +248,15 @@ Review the redacted phase 4 attempt summary and `summary.json`; do not inspect o
 ## Legacy and non-current material
 
 - `ingesta_api_pull_pre.json` is superseded by the API-key configuration for the current PRE profile.
-- Unvalidated production-profile configurations are excluded from the current public flow.
+- `ingesta_api_pull_pro.json` is prepared project material, not the validated PRE path described here.
 - B2/CSV/InesDataStore remains the delivered T1 evidence baseline and is not this `HttpData-PULL` flow.
-- Legacy upstream-authentication helpers and phase 4 upstream-authentication flags are excluded.
+- Upstream JWT helpers, Bearer-token variables, and phase 4 upstream-authentication flags are historical.
 - `v1` is legacy-supported and not used by the recommended block.
 - `test3` and old workshop procedures are historical.
 
 ## Related documentation
 
+- [Workshop](../workshop.md)
 - [Architecture](../architecture.md)
 - [Authentication](../authentication.md)
 - [Execution phases](../execution-phases.md)

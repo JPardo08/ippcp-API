@@ -1,10 +1,10 @@
 # Evidence and Traceability
 
+This is a reference document. Practical evidence commands from a completed workshop run are in [workshop.md](workshop.md).
+
 ## Purpose
 
-This document is the canonical source for run identification, generated artifacts, manifests, and evidence safety inside the project.
-
-Evidence-export commands: [`tools/tools_README.md`](../tools/tools_README.md). Tooling model: [`tools/evidence_tooling.md`](../tools/evidence_tooling.md). Sharing rules: [Evidence Publication Policy](evidence-publication.md).
+This document is the canonical source for run identification, generated artifacts, manifests, and evidence safety.
 
 ## Run identifier
 
@@ -230,45 +230,41 @@ The scripts write the manifest to:
 
 The SHA-256 value binds the manifest to the materialized bytes. Matching hashes prove byte-for-byte equality between compared files; they do not independently prove source authenticity or authorization.
 
-## Slots, runs, and classified assets
+## Evidence slots and asset classification
 
-`T1`–`T4` are presentation slots in the evidence exporters. They are not asset types.
+T1, T2, T3, and T4 are presentation slots. They are not asset types.
 
 ```text
-T* = slot
-SUFFIX = run
-run => automatic asset classification
-asset => critical / publication_profile / publication_safe
+run  ->  asset classification
+asset  ->  critical / publication_profile / publication_safe
 ```
 
-There is no fixed mapping such as T1 = CSV, T2 = WFS, T3 = SPARQL, or T4 = Ingestion API.
+`--tests SLOT=SUFFIX` selects exactly those slots. The tool classifies each run from `summary.json`, asset metadata, phases, transfer type, and media type. Slot order is arbitrary.
 
-CSV/B2/InesDataStore remains a **legacy historical baseline**. It is not the current Golden Path. Reconstruct it only through an explicit preset (`--preset legacy_assessment` or `--preset legacy_test3`) or an explicit `--tests` mapping. Commands: [`tools/tools_README.md`](../tools/tools_README.md).
+Do not treat T1 as CSV, T2 as WFS, T3 as SPARQL, or T4 as Ingestion API. A COMPLETE example may place Ingestion API in T1 and SPARQL in T4; a SINGLE example may place Ingestion API in T3. `--only-tests` is a compatibility filter. It does not invent slots and is not the Golden Path for Ingestion API.
 
-The current HttpData-PULL flows (Ingestion API v2, WFS, SPARQL) are classified from each run. Ingestion API v2 is `critical=true` and uses `publication_profile=minimal_publication` (`publication_safe=true`) in **any** slot. WFS and SPARQL currently use `standard` (`publication_safe=false`, reported as `standard_internal`).
+Historical delivered assessment evidence is selected with `--preset legacy_assessment`. That preset still occupies slots; assets are classified from each run. CSV/B2 remains a preserved baseline and is not the current workshop path.
 
-### Why Ingestion API v2 uses a separate publication profile
+### Publication profiles
 
-The Ingestion API is not an unauthenticated public endpoint. Provider Data Plane access to the upstream API requires provider-side `X-Api-Key` and `X-Provider-Id` values. These operational values remain inside the provider boundary. They are invisible to the consumer, are not propagated through the EDR, and must never enter an evidence package, workbook, or public example. The evidence tools do not obtain or transport the API key.
+Publication policy is a property of the classified asset, not of the slot id:
 
-That asset therefore uses the shared `minimal_publication` model, strict field and artifact allowlists, and separate sanitized-output rules. The profile belongs to `ingestion_api_v2`, not to slot T4. This separation reflects a stricter security and publication boundary; it does not make the Ingestion API less valid, secondary, or experimental.
+- `minimal_publication` → `publication_safe=true` (current Ingestion API v2 asset);
+- `standard` → `publication_safe=false` (current WFS, SPARQL, and legacy CSV/B2 assets).
 
-### Evidence export selection
+```text
+package.publication_ready = all included slots are publication_safe
+```
 
-Both `package_evidence_bundle.py` and `export_evidence_to_excel.py` use the same selection behavior. Details and Golden Path commands: [`tools/tools_README.md`](../tools/tools_README.md).
+The Ingestion API is not an unauthenticated public endpoint. Provider Data Plane access to the upstream API requires provider-side `X-Api-Key` and `X-Provider-Id` values. These operational values remain inside the provider boundary. They are invisible to the consumer, are not propagated through the EDR, and must never enter an evidence package, workbook, or public example.
 
-- `--tests` is an exact slot set. `--tests "T1=<suffix>"` selects only T1. `--tests "T1=<suffix>,T3=<suffix>"` selects only T1 and T3.
-- Without `--tests` or `--preset`, no slots are selected.
-- `--only-tests` only filters an already selected set. It is not required for a single-slot export.
-- `--preset legacy_assessment` and `--preset legacy_test3` are explicit historical reconstructions.
+A package that includes any `standard` asset is not publication-ready. A SINGLE package that includes only the Ingestion API v2 asset can be publication-ready after review.
 
-A current four-slot complete that includes WFS/SPARQL `standard` slots has `publication_ready=false`. Do not send that package externally. `standard_internal` slots may retain real identifiers, local paths, global snapshots, and cross-asset references.
-
-For `minimal_publication` slots, the runtime suffix is used only to locate evidence. It is replaced by placeholders and must not appear in cells, filenames, properties, relationships, or public inventories.
+Operator commands: [workshop.md](workshop.md). Tool semantics: [tools/evidence_tooling.md](../tools/evidence_tooling.md) and [tools/tools_README.md](../tools/tools_README.md).
 
 ### Shared exclusions
 
-If an allowlisted semantic-validation metadata file is not present, `validation_status.json` reports `not_recorded`. The exporter does not inspect the downloaded payload or infer semantic success from phase4 completion.
+If an allowlisted semantic-validation metadata file is not present, `validation_status.json` reports `not_recorded`. The exporter does not inspect the downloaded payload or infer semantic success from phase 4 completion.
 
 The `minimal_publication` profile excludes:
 
@@ -284,7 +280,7 @@ The `minimal_publication` profile excludes:
 
 The source payload SHA-256 value is withheld by default. The sanitized manifest retains the algorithm and verification metadata. Publication of a real hash requires the approval defined in the [Evidence Publication Policy](evidence-publication.md).
 
-A generated structural example is available under [Synthetic Ingestion API evidence example](../examples/evidence/t4-ingestion-api/README.md). The directory name is historical. The files were produced from a synthetic fixture and are not raw output from the validated PRE run.
+A generated structural example is available under [Synthetic evidence example](../examples/evidence/t4-ingestion-api/README.md). It was produced from a synthetic fixture and is not raw output from a validated PRE run. The directory name is historical; current tooling names archive entries `{SLOT}_{sheet_slug}`.
 
 ## Internal and publishable evidence
 
@@ -366,8 +362,7 @@ Before treating a run as complete:
 
 ## Related documentation
 
-- [Evidence export CLI](../tools/tools_README.md)
-- [Evidence tooling model](../tools/evidence_tooling.md)
+- [Workshop](workshop.md)
 - [Evidence Publication Policy](evidence-publication.md)
 - [Execution phases](execution-phases.md)
 - [Backend integration](backend-integration.md)

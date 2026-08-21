@@ -1,5 +1,7 @@
 # Architecture
 
+This is a reference document. The executable operator path is [workshop.md](workshop.md).
+
 ## Purpose
 
 This document is the canonical description of the current IPPCP automation architecture. It defines the logical actors, control and data flows, version status, and security boundaries without prescribing a deployment topology.

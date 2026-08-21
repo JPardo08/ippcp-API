@@ -1,18 +1,44 @@
 # IPPCP API
 
-## Overview
+This repository contains command-line automation for validating IPPCP data exchanges through an INESData data space.
 
-This repository contains command-line automation and technical documentation for validating IPPCP data exchanges through an INESData data space.
+A provider publishes an asset. A consumer discovers it, negotiates access, starts a transfer, retrieves an Endpoint Data Reference (EDR), and materializes an authorized local download.
 
-The current workflow publishes a provider asset, discovers it from a consumer connector, negotiates access, starts a transfer, retrieves an Endpoint Data Reference (EDR), and materializes an authorized local download.
+The current implementation is operated through Bash phase scripts. A final backend API is not presented as implemented.
 
-The implementation is currently operated through Bash phase scripts. A final backend API is not presented as implemented.
+## Start here
 
-## Public access and execution boundary
+Follow the executable workshop from a clean clone:
 
-This repository is public. Its documentation and automation may be reviewed and reused under the terms of the [Apache License 2.0](LICENSE).
+**[docs/workshop.md](docs/workshop.md)**
 
-Running the validated flows requires network access to the configured connectors, provisioned technical users, local credentials, and valid configuration for both the environment and the selected upstream resource. These operational elements are not supplied by the public repository. Without them, the repository remains a technical and automation reference, not a standalone EdD environment, and access to the validated PRE profile must not be assumed.
+That document is the Golden Path: machine setup, local credentials, Phase 0 through Phase 4, semantic validation, traceability, and evidence packaging.
+
+## What you can run
+
+Current assets use `v2` `HttpData-PULL`:
+
+- Ingestion API v2
+- WFS city
+- WFS districts / juntas
+- SPARQL Results JSON
+
+Current lifecycle:
+
+```text
+phase0 -> phase1 -> phase2 -> phase3 -> phase4
+```
+
+| Role | Connector |
+| --- | --- |
+| Provider | `conn-citycouncil-ippcp` |
+| Consumer | `conn-company-ippcp` |
+
+Ingestion API uses `IPPCP_FLOW=ingesta`. WFS and SPARQL use `IPPCP_FLOW=consumo`.
+
+## Access boundary
+
+Running the validated flows requires network access to the configured connectors, provisioned technical users, local credentials, and valid configuration for the selected upstream resource. Those operational elements are not supplied by the repository. Without them, the repository remains a technical and automation reference, not a standalone EdD environment.
 
 ## Architecture
 
@@ -20,107 +46,35 @@ Running the validated flows requires network access to the configured connectors
 
 [Architecture](docs/architecture.md) is the current source for actors, control and data planes, security boundaries, and implementation status.
 
-## Supported flows
+## Reference documentation
 
-The current public flows use `HttpData-PULL`:
+Use these after the workshop, or when you need detail that the workshop does not repeat at length:
 
-- [Ingestion API](docs/flows/ingestion-api.md): a protected JSON API whose upstream headers remain provider-side.
-- [WFS](docs/flows/wfs.md): current city and district-board GeoJSON layers.
-- [SPARQL](docs/flows/sparql.md): SPARQL Results JSON with an explicit response format.
-
-Each flow guide defines its asset configuration, flow-specific variables, complete execution block, semantic content validation, and common errors.
-
-## How the workflow works
-
-The current sequence is:
-
-```text
-phase0 -> phase1 -> phase2 -> phase3 -> phase4
-```
-
-- Phase 0 resolves context, authenticates provider and consumer connector roles, and performs smoke checks.
-- Phase 1 publishes provider policies, the asset, its data address, and the contract definition.
-- Phase 2 discovers the asset, negotiates access, and obtains the agreement.
-- Phase 3 starts the transfer and retrieves an EDR.
-- Phase 4 retrieves a current EDR, downloads data through the Data Plane, and writes a manifest with SHA-256.
-
-See [Execution phases](docs/execution-phases.md) for the canonical phase model and inherited state.
-
-## Requirements
-
-- Bash 4.3 or newer.
-- Git.
-- `curl` and `jq`.
-- Python 3, recommended for diagnostics.
-- Network access to the configured EdD connectors and selected upstream resource.
-- Provider and consumer EdD technical credentials for the configured dataspace/connectors.
-- Flow-specific upstream secrets only when required.
-
-Passwords, tokens, API keys, and EDR authorization must remain outside Git and public documentation.
-
-## Quick start
-
-Clone the public repository and enter its root:
-
-```bash
-git clone https://github.com/JPardo08/ippcp-API.git
-cd ippcp-API
-```
-
-Then follow [Getting Started](docs/getting-started.md) to:
-
-1. select Bash and verify dependencies;
-2. prepare ignored provider and consumer credential files;
-3. select `IPPCP_DATASPACE`, `IPPCP_FLOW`, and `IPPCP_FLOW_VERSION=v2`;
-4. choose the Ingestion API, WFS, or SPARQL guide;
-5. run phase 0 through phase 4;
-6. verify the run summary, download, manifest, and SHA-256.
-
-Do not copy a complete flow from historical or internal material. Use the current flow guides linked below.
-
-## Documentation
-
-Start here:
-
-- [Getting Started](docs/getting-started.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [Demo documentation](docs/demo/README.md)
-
-Canonical technical references:
-
-- [Architecture](docs/architecture.md)
-- [Authentication](docs/authentication.md)
+- [Getting started](docs/getting-started.md)
 - [Execution phases](docs/execution-phases.md)
-- [Evidence and traceability](docs/evidence-and-traceability.md)
-- [Backend integration](docs/backend-integration.md)
-
-Flow guides:
-
 - [Ingestion API](docs/flows/ingestion-api.md)
 - [WFS](docs/flows/wfs.md)
 - [SPARQL](docs/flows/sparql.md)
-
-The public entry path intentionally does not promote internal migration notes, archived procedures, raw evidence, or obsolete workshop documentation.
+- [Evidence and traceability](docs/evidence-and-traceability.md)
+- [Evidence publication](docs/evidence-publication.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Authentication](docs/authentication.md)
+- [Backend integration](docs/backend-integration.md)
+- [Demo documentation](docs/demo/README.md)
+- [Evidence tooling](tools/tools_README.md)
 
 ## Current and legacy versions
 
 `v2` is current and recommended for new integrations.
 
-`v1` is retained as legacy-supported project material. It is not used by the recommended quick start.
+Historical / reference only:
 
-`test3`, discarded experiments, upstream JWT authentication, flat pre-versioned paths, and old workshop procedures are historical or obsolete.
+- CSV / B2 / InesDataStore
+- `v1`
+- `test3`
+- `phase1b` / `phase3b` / `phase4b`
 
-The B2/CSV/InesDataStore T1 delivery remains a preserved evidence baseline. It is distinct from the recommended current `HttpData-PULL` integration.
-
-## Validation status
-
-The current Ingestion API, WFS, and SPARQL flows have been validated end-to-end in the available PRE profile, including phase 4 download and manifest creation.
-
-PRE is the currently validated environment profile, not a universal deployment requirement. Other environments require their own validated connector and upstream configuration.
-
-Public documentation does not publish internal connector hosts, execution identifiers, UUIDs, hashes, credentials, or raw business data.
-
-See [Evidence and traceability](docs/evidence-and-traceability.md) for the distinction between internal evidence and approved publishable artifacts.
+Do not mix legacy material into the workshop path.
 
 ## Security
 
@@ -133,12 +87,10 @@ Never commit or publish:
 - OAuth client secrets;
 - storage credentials;
 - ignored local credential or environment files;
-- sensitive URL parameters;
+- current real `SUFFIX` values;
 - raw business data.
 
 Provider and consumer EdD credentials authenticate their configured connectors. Flow-specific upstream credentials protect a different network hop and must not be shared with the consumer.
-
-Use run-specific summaries and redacted artifacts for diagnosis. Do not reproduce the internal EDR authorization candidate loop manually.
 
 ## License and acknowledgements
 

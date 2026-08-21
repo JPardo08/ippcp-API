@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This guide covers the current `v2` `HttpData-PULL` execution path. Start with [Getting Started](getting-started.md), then use the flow-specific guide:
+This guide covers the current `v2` `HttpData-PULL` execution path. Start with the executable [workshop](workshop.md), then use this document and the flow-specific reference:
 
 - [Ingestion API](flows/ingestion-api.md)
 - [WFS](flows/wfs.md)
@@ -934,13 +934,14 @@ Use asset ID, `SUFFIX`, run-specific paths, and manifest metadata for durable tr
 ## Legacy and historical boundaries
 
 - `v1` is legacy-supported and not the recommended path.
-- B2/CSV/InesDataStore is preserved as delivered historical baseline evidence; its `phase*b` procedures are not part of this active guide.
-- `test3`, flat pre-versioned flow paths, upstream JWT authentication, phase 3 inline download, and old workshop steps are historical or obsolete.
+- B2/CSV/InesDataStore is preserved as delivered baseline evidence; its `phase*b` procedures are not part of this active guide.
+- `test3`, flat pre-versioned flow paths, upstream JWT authentication, phase 3 inline download, and obsolete workshop procedures are historical.
 
-Historical procedures are intentionally not repaired or merged here. Use [Evidence and traceability](evidence-and-traceability.md) for slot versus asset classification, and [`tools/tools_README.md`](../tools/tools_README.md) for exporter commands.
+Historical procedures are intentionally not repaired or merged here. T1–T4 are presentation slots; see [Evidence and traceability](evidence-and-traceability.md) and [workshop.md](workshop.md).
 
 ## Related documentation
 
+- [Workshop](workshop.md)
 - [Getting Started](getting-started.md)
 - [Architecture](architecture.md)
 - [Authentication](authentication.md)
