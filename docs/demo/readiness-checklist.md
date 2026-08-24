@@ -11,7 +11,7 @@ The checklist does not establish formal KPI or assessment compliance. It verifie
 - [ ] The use case and business stage are confirmed.
 - [ ] Functional and technical stakeholders are identified by role.
 - [ ] Provider, consumer, presenter/operator, and functional-speaker responsibilities are confirmed.
-- [ ] One primary validated demo variant is selected: Ingestion API v2, WFS, or SPARQL JSON.
+- [ ] One primary validated demo variant is selected: Ingestion API PROD POST (Industrias Ebro), Ingestion API PRE GET, WFS, or SPARQL JSON.
 - [ ] The selected variant matches the intended audience, demo objective, available environment, and desired business narrative.
 - [ ] The expected business result is agreed and can be explained without sensitive payloads.
 - [ ] The distinction between business Phase A–C and technical `phase0`–`phase4` is ready to explain.
@@ -27,9 +27,9 @@ The checklist does not establish formal KPI or assessment compliance. It verifie
 - [ ] Provider EdD credentials are available securely through the expected ignored local file.
 - [ ] Consumer EdD credentials are available securely through the expected ignored local file.
 - [ ] Flow-specific secrets are available securely only when required.
-- [ ] For Ingestion API, the API key and provider identifier can be loaded immediately before phase1 and removed from the environment immediately afterward.
-- [ ] The currently available PRE profile is reachable.
-- [ ] No statement or presentation assumes that PRO/POST has been validated.
+- [ ] For Ingestion API PRE GET, the PRE API key and provider identifier can be loaded immediately before phase1 and removed afterward.
+- [ ] For Ingestion API PROD POST, the PROD API key file, local request body file (`INGESTA_API_REQUEST_BODY_FILE`), and Industrias Ebro config are ready; CIRCE is not presented as phase-4 validated without a CIRCE-specific body.
+- [ ] The target environment (PRE and/or PROD as selected) is reachable.
 - [ ] Required local tools and a supported Bash version are available as described in the [workshop](../workshop.md) and [Getting Started](../getting-started.md).
 
 ## Flow readiness
@@ -40,9 +40,11 @@ The checklist does not establish formal KPI or assessment compliance. It verifie
 - [ ] Phase1 publishes the asset and contract definition successfully.
 - [ ] Phase2 obtains a valid agreement; a display state alone is not accepted without the agreement identifier.
 - [ ] Phase3 creates or resumes the intended transfer and resolves an EDR.
-- [ ] Phase4 materializes a non-empty download through the Data Plane.
+- [ ] Phase4 completes with the expected result mode for the selected variant:
+  - materialized-response: non-empty download through the Data Plane;
+  - PROD POST: HTTP 2xx POST metadata-only (`post_result.json` / `post_manifest.json`); no GET-style download required.
 - [ ] The complete run uses one consistent `run_id`/`SUFFIX`.
-- [ ] Ingestion API semantic validation confirms non-empty valid JSON.
+- [ ] PRE GET Ingestion API semantic validation confirms non-empty valid JSON.
 - [ ] WFS semantic validation confirms valid GeoJSON with the expected `FeatureCollection` structure.
 - [ ] SPARQL semantic validation confirms SPARQL Results JSON with `head` and `results.bindings`.
 - [ ] Only the semantic check for the selected primary variant is presented as the live result.
@@ -53,9 +55,9 @@ The checklist does not establish formal KPI or assessment compliance. It verifie
 - [ ] Run-specific artifacts exist under one correlated execution.
 - [ ] Provider asset and contract-definition identifiers are present internally.
 - [ ] Consumer negotiation, agreement, and transfer identifiers are present internally.
-- [ ] The phase4 manifest references the intended materialized result.
-- [ ] The recorded byte count is non-zero and matches the selected result.
-- [ ] SHA-256 verification succeeds.
+- [ ] The phase4 traceability artifact matches the selected mode (download manifest or POST control metadata).
+- [ ] For materialized-response flows: recorded byte count is non-zero and SHA-256 verification succeeds.
+- [ ] For PROD POST: HTTP 2xx and `manifest_kind=post_metadata_only`; no response SHA-256 required.
 - [ ] Any screenshot intended for display is redacted and approved.
 - [ ] Any prepared output is sanitized and approved.
 - [ ] No raw password, API key, JWT, EDR authorization, or credential file is included.
@@ -63,7 +65,7 @@ The checklist does not establish formal KPI or assessment compliance. It verifie
 - [ ] T1–T4 are described as presentation slots, not asset types.
 - [ ] The asset in each slot is classified from the run.
 - [ ] CSV/B2 is described as a preserved historical baseline, not the current workshop path.
-- [ ] Ingestion API, WFS city, WFS juntas, and SPARQL are the current workshop assets.
+- [ ] Ingestion API PRE GET, PROD POST (Industrias Ebro), WFS city, WFS juntas, and SPARQL are the current workshop profiles.
 - [ ] `--tests SLOT=SUFFIX` is used for current packaging; `--only-tests T4` is not the Ingestion API Golden Path.
 - [ ] A COMPLETE example may assign any current asset to any slot.
 - [ ] A SINGLE example may place Ingestion API in a non-T4 slot to demonstrate slot independence.

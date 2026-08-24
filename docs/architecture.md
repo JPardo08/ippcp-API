@@ -13,7 +13,7 @@ Detailed authentication behavior is maintained in [Authentication](authenticatio
 The documentation uses these terms consistently:
 
 - **Current and recommended:** the `v2` `HttpData-PULL` execution path for new integrations.
-- **Validated:** behavior demonstrated end-to-end with a materialized phase 4 download and verified manifest.
+- **Validated:** behavior demonstrated end-to-end with a successful phase 4 technical result — either a materialized download with verified manifest (materialized response) or POST metadata-only control artifacts with HTTP 2xx.
 - **Legacy-supported and not recommended:** `v1` project material retained for compatibility.
 - **Delivered baseline evidence:** the B2/CSV/InesDataStore T1 evidence. It is preserved as an accepted delivery baseline but is not the recommended current integration.
 - **Historical or obsolete:** `test3`, discarded experiments, the upstream JWT approach, and old workshop procedures.
@@ -137,11 +137,13 @@ The material data flow is:
 2. Phase 4 retrieves a current EDR at runtime.
 3. Phase 4 calls the Data Plane with the EDR credential.
 4. The Data Plane reads the provider asset data address.
-5. The Data Plane calls the upstream resource.
+5. The Data Plane calls the upstream resource (GET for materialized-response flows; POST with proxied body for PROD Ingestion API).
 6. The response returns through the Data Plane to the consumer-side execution.
-7. Phase 4 stores the download, manifest, and SHA-256 hash.
+7. Phase 4 stores the technical result:
+   - **materialized response:** download, manifest, and SHA-256 hash;
+   - **POST metadata-only:** HTTP/control metadata only — no persisted request/response bodies, no GET-style download, no response SHA-256.
 
-For the Ingestion API, the API key remains provider-side in the asset data address. The consumer and its future backend do not receive it.
+For the Ingestion API, upstream credentials remain provider-side in the asset data address. The consumer and its future backend do not receive them. PROD POST additionally requires a local consumer request body file at phase 4; that file is not persisted in evidence.
 
 ## Management API endpoint composition
 
@@ -199,8 +201,10 @@ The full credential ownership and persistence rules are defined in [Authenticati
 
 ### Validated
 
-- Current Ingestion API execution completed end-to-end in PRE.
-- WFS and SPARQL executions completed with verified phase 4 outputs.
+- PRE GET Ingestion API execution completed end-to-end with materialized download and verified manifest.
+- PROD POST Ingestion API — Industrias Ebro: phases 0–4 validated (POST metadata-only phase 4).
+- PROD POST Ingestion API — CIRCE: phases 0–3 validated; phase 4 pending a CIRCE-specific request body (do not reuse Industrias Ebro payload).
+- WFS and SPARQL executions completed with verified materialized phase 4 outputs.
 
 Concrete validation identifiers and hashes remain internal unless explicitly sanitized and approved.
 
@@ -210,7 +214,7 @@ Concrete validation identifiers and hashes remain internal unless explicitly san
 
 ### Delivered baseline
 
-- B2/CSV/InesDataStore evidence is preserved as a delivered historical baseline. It is not replaced by the current Ingestion API v2 `HttpData-PULL` validation.
+- T1 B2/CSV/InesDataStore evidence is preserved as a delivered baseline. It is not replaced by the additional T4 Ingestion API validation.
 
 ### Historical or obsolete
 

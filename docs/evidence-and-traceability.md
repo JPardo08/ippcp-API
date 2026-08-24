@@ -137,9 +137,11 @@ Phase 3 records:
 
 Raw EDR authorization is runtime-only material and is not evidence.
 
-### Phase 4: download and verification
+### Phase 4: consumption and verification
 
-Phase 4 records:
+Phase 4 has two result modes. See [Execution phases](execution-phases.md#phase-4-data-consumption-and-verification).
+
+**Materialized response** — PRE GET Ingestion API, WFS, SPARQL:
 
 - consumer re-authentication claims;
 - a newly retrieved, redacted EDR data address;
@@ -150,7 +152,16 @@ Phase 4 records:
 - SHA-256;
 - run-specific and latest download manifests.
 
-Phase 4 does not create a phase environment file.
+**POST metadata-only** — PROD Ingestion API:
+
+- consumer re-authentication claims;
+- redacted EDR data address;
+- `post_result.json` and `post_manifest.json` with `manifest_kind=post_metadata_only`;
+- HTTP status, method, and byte counts;
+- explicit flags that request/response bodies and GET-style downloads were not persisted;
+- no response SHA-256 and no `downloads/assets/` artifact for the POST response.
+
+Phase 4 does not create a phase environment file in either mode.
 
 See [Execution phases](execution-phases.md) for the operational inputs and outputs of each phase.
 
@@ -195,7 +206,9 @@ Before resuming:
 
 ## Downloads and manifests
 
-Successful phase 4 execution creates:
+### Materialized response
+
+Successful materialized phase 4 execution creates:
 
 ```text
 downloads/assets/<asset_id>/<run_id>.<extension>
@@ -229,6 +242,17 @@ The scripts write the manifest to:
 - `phase4/download_summary.json`.
 
 The SHA-256 value binds the manifest to the materialized bytes. Matching hashes prove byte-for-byte equality between compared files; they do not independently prove source authenticity or authorization.
+
+### POST metadata-only
+
+PROD Ingestion API phase 4 creates control metadata under the run directory only:
+
+```text
+evidencias/runs/<run_id>/phase4/post_result.json
+evidencias/runs/<run_id>/phase4/post_manifest.json
+```
+
+Do not require a GET-style download manifest or response SHA-256 for this mode. Request and response bodies must not appear in persisted evidence.
 
 ## Evidence slots and asset classification
 
@@ -264,7 +288,7 @@ Operator commands: [workshop.md](workshop.md). Tool semantics: [tools/evidence_t
 
 ### Shared exclusions
 
-If an allowlisted semantic-validation metadata file is not present, `validation_status.json` reports `not_recorded`. The exporter does not inspect the downloaded payload or infer semantic success from phase 4 completion.
+If an allowlisted semantic-validation metadata file is not present, `validation_status.json` reports `not_recorded`. The exporter does not inspect downloaded payloads or infer semantic success from phase 4 completion alone. For POST metadata-only runs, semantic payload inspection is not applicable.
 
 The `minimal_publication` profile excludes:
 
@@ -310,15 +334,19 @@ An artifact is publishable only after explicit sanitization and approval. A publ
 - package manifests listing included and excluded files;
 - hashes calculated after sanitization and packaging.
 
-Public documentation can state that a flow completed end-to-end in PRE with a successful data response and verified manifest. It must not expose the concrete validation run unless that run has been separately sanitized and approved.
+Public documentation can state that a flow completed end-to-end with a successful phase 4 technical result. For PRE GET, WFS, or SPARQL, that includes a verified download manifest and SHA-256. For PROD POST, that includes HTTP 2xx and safe POST control metadata — not a fake download or response hash. It must not expose concrete validation runs unless separately sanitized and approved.
 
 ## Sanitized validation example
 
-A safe public statement is:
+A safe public statement for PRE GET is:
 
-> The current v2 Ingestion API flow was validated end-to-end in PRE. Phase 4 returned a successful data response and generated a manifest with a verified SHA-256 hash.
+> The current v2 Ingestion API PRE GET flow was validated end-to-end. Phase 4 returned a successful data response and generated a manifest with a verified SHA-256 hash.
 
-This statement intentionally omits the run identifier, connector object identifiers, hash value, hosts, organization data, raw response, and authorization material.
+A safe public statement for PROD POST is:
+
+> The current v2 Ingestion API PROD POST flow (Industrias Ebro) was validated through phase 4. Phase 4 recorded successful POST metadata-only control artifacts with HTTP 2xx. Request and response bodies were not persisted.
+
+These statements intentionally omit run identifiers, connector object identifiers, hash values, hosts, organization data, raw responses, and authorization material.
 
 ## Evidence safety
 
@@ -351,14 +379,45 @@ Automated scanning is a safeguard, not publication approval. New credential fiel
 
 Before treating a run as complete:
 
-1. verify a single `SUFFIX` across summary, phase files, downloads, and manifests;
+1. verify a single `SUFFIX` across summary, phase files, and applicable artifacts;
 2. verify all expected phase statuses are `ok`;
 3. verify core identifiers form one publication-negotiation-transfer chain;
 4. verify HTTP status artifacts agree with summary metadata;
-5. recompute the download SHA-256 and compare it with the run-specific manifest;
-6. verify the run-specific file rather than relying only on `latest.*`;
+5. **materialized response:** recompute the download SHA-256 and compare it with the run-specific manifest; verify the run-specific file rather than relying only on `latest.*`;
+6. **POST metadata-only:** confirm `post_manifest.json` has `manifest_kind=post_metadata_only`, HTTP 2xx, and `download_persisted=false`; do not require a response SHA-256;
 7. scan every candidate artifact for secrets and local paths;
 8. review the final package manifest and exclusions.
+
+## Run inspection commands
+
+Never inspect only `latest.*` without fixing `SUFFIX` and `ASSET_ID` first.
+
+```bash
+export SUFFIX="<suffix>"
+export ASSET_ID="<asset_id>"
+RUN_DIR="evidencias/runs/${SUFFIX}"
+test -d "$RUN_DIR" && echo "OK run dir" || echo "FAIL run dir"
+jq '{suffix, ds_name, started_at, phases}' "$RUN_DIR/summary.json"
+find "$RUN_DIR" -maxdepth 2 -type f -print | sort
+```
+
+Materialized-response flows (PRE GET, WFS, SPARQL):
+
+```bash
+DOWNLOAD_FILE="downloads/assets/${ASSET_ID}/latest.${ASSET_EXTENSION:-json}"
+MANIFEST_FILE="downloads/manifests/${ASSET_ID}/latest.manifest.json"
+test -s "$DOWNLOAD_FILE" && echo "OK download" || echo "FAIL download"
+jq '{suffix, asset_id, bytes, media_type, sha256, latest_file}' "$MANIFEST_FILE"
+```
+
+POST metadata-only (PROD Ingestion API):
+
+```bash
+jq . "$RUN_DIR/phase4/post_result.json"
+jq . "$RUN_DIR/phase4/post_manifest.json"
+```
+
+Full command blocks for summary, manifest, SHA-256, semantic checks, runtime env presence, and suspicious-artifact searches are in [workshop.md](workshop.md) (section 14).
 
 ## Related documentation
 

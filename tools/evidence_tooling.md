@@ -1,108 +1,372 @@
-# Evidence tooling architecture
+# Evidence tooling (operational reference)
 
-CLI entry point: [`tools_README.md`](tools_README.md). Traceability: [`../docs/evidence-and-traceability.md`](../docs/evidence-and-traceability.md). Sharing rules: [`../docs/evidence-publication.md`](../docs/evidence-publication.md).
+T1, T2, T3, and T4 are presentation slots. The asset in each slot is classified from the run.
 
-T1, T2, T3 and T4 are slot positions. The asset in each slot is classified from the run.
+Executable workshop commands: [docs/workshop.md](../docs/workshop.md) (section 16).
 
-Executable workshop commands: [docs/workshop.md](../docs/workshop.md).
+## What the tools do
+
+```text
+evidencias/runs -> Excel summary -> sanitized ZIP -> secret/publication audit
+```
+
+The tools are read-only over source evidence. They must not modify `evidencias/runs/`, `downloads/`, phase env files, or phase scripts.
+
+## Requirements
+
+Python 3.10+. Inspection commands in the workshop also use `jq`, `unzip`, and `rg`.
+
+```bash
+python3 --version
+command -v jq
+command -v unzip
+command -v rg
+python3 -m pip install -r tools/requirements-evidence-export.txt
+```
+
+Optional venv:
+
+```bash
+python3 -m venv .venv-evidence
+source .venv-evidence/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r tools/requirements-evidence-export.txt
+```
 
 ## Slot selection
 
 `--tests` is an exact slot set. No YAML suffixes are merged in.
 
-- `--tests "T1=a"` => only T1
-- `--tests "T1=a,T3=c"` => only T1 and T3
-- `--tests "T1=a,T2=b,T3=c,T4=d"` => four-slot complete
+```text
+--tests "T1=<suffix>"
+--tests "T1=<suffix>,T3=<suffix>"
+--tests "T1=<s1>,T2=<s2>,T3=<s3>,T4=<s4>"
+```
 
-`--only-tests` remains as a compatibility filter. It never invents slots. Golden Path SINGLE does not need it: `--tests "T1=<suffix>"` is already exact.
+Without `--tests` or `--preset`, there is no implicit selection.
 
-Historical/canonical runs are selected with an explicit preset. T* stay slots; assets are still classified from each run.
+`--only-tests` filters an already selected set; it does not invent slots.
 
-```bash
+Historical presets:
+
+```text
 --preset legacy_assessment
 --preset legacy_test3
 ```
 
 `--profile` selects sanitization defaults only. It does not assign assets to slots.
 
-`--sanitize-connectors` and `--redact-local-paths` remain available as overrides.
-
-## Publication status
-
-Each classified asset has `publication_profile` and `publication_safe`.
-
-- `minimal_publication` => `publication_safe=true`
-- `standard` (current internal delivery profile) => `publication_safe=false`
-
-Package status is derived from the included slots, not from "contains a critical asset":
-
-```text
-package.publication_ready = all included slots are publication_safe
-package.publication_blockers = ["slot T1 uses standard_internal", ...]
-```
-
-A current four-slot complete that includes WFS/SPARQL `standard` slots is `publication_ready=false`. Do not send it externally. `package_status.json` and `slot_inventory.json` are always written.
-
-A `minimal_publication`-only package omits Excel. This warning is expected and is not a failure:
-
-```text
-WARN: Excel inclusion is disabled for minimal_publication-only packages
-```
-
-## Golden Path
-
-Deterministic naming:
+## Recommended suffix variables
 
 ```bash
-TS=$(date +%Y%m%d_%H%M%S)
-EXPORT_DIR="reports/exports/$TS"
-WORKBOOK="$EXPORT_DIR/ippcp_evidence_summary_${TS}.xlsx"
+export INGESTION_SUFFIX="<suffix>"
+export WFS_JUNTAS_SUFFIX="<suffix>"
+export WFS_CITY_SUFFIX="<suffix>"
+export SPARQL_SUFFIX="<suffix>"
 ```
 
-COMPLETE four slots:
+Validate:
 
 ```bash
+: "${INGESTION_SUFFIX:?Set INGESTION_SUFFIX}"
+: "${WFS_JUNTAS_SUFFIX:?Set WFS_JUNTAS_SUFFIX}"
+: "${WFS_CITY_SUFFIX:?Set WFS_CITY_SUFFIX}"
+: "${SPARQL_SUFFIX:?Set SPARQL_SUFFIX}"
+```
+
+## COMPLETE (four slots)
+
+```bash
+COMPLETE_TS=$(date +%Y%m%d_%H%M%S)
+COMPLETE_EXPORT_DIR="reports/exports/complete_$COMPLETE_TS"
+COMPLETE_WORKBOOK="$COMPLETE_EXPORT_DIR/ippcp_evidence_summary_${COMPLETE_TS}.xlsx"
+COMPLETE_ZIP="$COMPLETE_EXPORT_DIR/ippcp_evidence_package_${COMPLETE_TS}.zip"
+COMPLETE_TESTS="T1=$INGESTION_SUFFIX,T2=$WFS_JUNTAS_SUFFIX,T3=$WFS_CITY_SUFFIX,T4=$SPARQL_SUFFIX"
+
 python3 tools/export_evidence_to_excel.py \
   --config tools/evidence_export.tests.yaml \
-  --tests "T1=$INGESTION_SUFFIX,T2=$WFS_JUNTAS_SUFFIX,T3=$WFS_CITY_SUFFIX,T4=$SPARQL_SUFFIX" \
-  --timestamp "$TS" \
-  --export-dir "$EXPORT_DIR" \
+  --tests "$COMPLETE_TESTS" \
+  --timestamp "$COMPLETE_TS" \
+  --export-dir "$COMPLETE_EXPORT_DIR" \
   --strict
 
 python3 tools/package_evidence_bundle.py \
   --config tools/evidence_export.tests.yaml \
-  --tests "T1=$INGESTION_SUFFIX,T2=$WFS_JUNTAS_SUFFIX,T3=$WFS_CITY_SUFFIX,T4=$SPARQL_SUFFIX" \
-  --excel "$WORKBOOK" \
-  --timestamp "$TS" \
-  --export-dir "$EXPORT_DIR" \
+  --tests "$COMPLETE_TESTS" \
+  --excel "$COMPLETE_WORKBOOK" \
+  --timestamp "$COMPLETE_TS" \
+  --export-dir "$COMPLETE_EXPORT_DIR" \
   --strict
 ```
 
-SINGLE:
+Do not recompute `COMPLETE_TS` between workbook and ZIP.
+
+Inspect:
 
 ```bash
+unzip -p "$COMPLETE_ZIP" ippcp_evidence_package/package_status.json | jq '{publication_ready, publication_blockers}'
+unzip -p "$COMPLETE_ZIP" ippcp_evidence_package/slot_inventory.json | jq .
+```
+
+## SINGLE (one slot)
+
+Example with Ingestion API in T3:
+
+```bash
+SINGLE_TS=$(date +%Y%m%d_%H%M%S)
+SINGLE_EXPORT_DIR="reports/exports/single_$SINGLE_TS"
+SINGLE_WORKBOOK="$SINGLE_EXPORT_DIR/ippcp_evidence_summary_${SINGLE_TS}.xlsx"
+SINGLE_ZIP="$SINGLE_EXPORT_DIR/ippcp_evidence_package_${SINGLE_TS}.zip"
+SINGLE_TESTS="T3=$INGESTION_SUFFIX"
+
 python3 tools/export_evidence_to_excel.py \
   --config tools/evidence_export.tests.yaml \
-  --tests "T3=$INGESTION_SUFFIX" \
+  --tests "$SINGLE_TESTS" \
+  --timestamp "$SINGLE_TS" \
+  --export-dir "$SINGLE_EXPORT_DIR" \
+  --strict
+
+python3 tools/package_evidence_bundle.py \
+  --config tools/evidence_export.tests.yaml \
+  --tests "$SINGLE_TESTS" \
+  --timestamp "$SINGLE_TS" \
+  --export-dir "$SINGLE_EXPORT_DIR" \
+  --strict
+```
+
+## Two slots (arbitrary order)
+
+```bash
+TS=$(date +%Y%m%d_%H%M%S)
+EXPORT_DIR="reports/exports/two_slot_$TS"
+TESTS="T3=$SPARQL_SUFFIX,T1=$WFS_CITY_SUFFIX"
+
+python3 tools/export_evidence_to_excel.py \
+  --config tools/evidence_export.tests.yaml \
+  --tests "$TESTS" \
   --timestamp "$TS" \
   --export-dir "$EXPORT_DIR" \
   --strict
 ```
 
-Historical assessment:
+## Preset export and packaging (`legacy_assessment`)
+
+Export and package with the **same timestamp** (do not recompute between workbook and ZIP):
 
 ```bash
+TS=$(date +%Y%m%d_%H%M%S)
+EXPORT_DIR="reports/exports/legacy_assessment_$TS"
+WORKBOOK="$EXPORT_DIR/ippcp_evidence_summary_${TS}.xlsx"
+ZIP="$EXPORT_DIR/ippcp_evidence_package_${TS}.zip"
+
 python3 tools/export_evidence_to_excel.py \
   --config tools/evidence_export.tests.yaml \
   --preset legacy_assessment \
   --timestamp "$TS" \
   --export-dir "$EXPORT_DIR" \
   --strict
+
+python3 tools/package_evidence_bundle.py \
+  --config tools/evidence_export.tests.yaml \
+  --preset legacy_assessment \
+  --excel "$WORKBOOK" \
+  --timestamp "$TS" \
+  --export-dir "$EXPORT_DIR" \
+  --strict
 ```
+
+Subset of a preset selection:
+
+```bash
+python3 tools/export_evidence_to_excel.py \
+  --config tools/evidence_export.tests.yaml \
+  --preset legacy_assessment \
+  --only-tests T1 \
+  --timestamp "$TS" \
+  --export-dir "$EXPORT_DIR" \
+  --strict
+```
+
+`legacy_test3`:
+
+```bash
+TS=$(date +%Y%m%d_%H%M%S)
+python3 tools/export_evidence_to_excel.py \
+  --config tools/evidence_export.tests.yaml \
+  --preset legacy_test3 \
+  --timestamp "$TS" \
+  --export-dir "reports/exports/legacy_test3_$TS" \
+  --strict
+```
+
+## Profile and sanitization overrides
+
+Explicit profile:
+
+```bash
+python3 tools/export_evidence_to_excel.py \
+  --config tools/evidence_export.tests.yaml \
+  --tests "T1=$INGESTION_SUFFIX" \
+  --profile <profile> \
+  --export-dir reports/exports/profile_example \
+  --strict \
+  --verbose
+```
+
+Enable connector sanitization (default in many paths):
+
+```bash
+python3 tools/export_evidence_to_excel.py \
+  --config tools/evidence_export.tests.yaml \
+  --tests "T1=$INGESTION_SUFFIX" \
+  --sanitize-connectors \
+  --export-dir reports/exports/sanitize_on \
+  --strict
+```
+
+Disable connector sanitization (controlled internal review only):
+
+```bash
+python3 tools/export_evidence_to_excel.py \
+  --config tools/evidence_export.tests.yaml \
+  --tests "T1=$INGESTION_SUFFIX" \
+  --no-sanitize-connectors \
+  --export-dir reports/exports/sanitize_off \
+  --verbose
+```
+
+Enable local-path redaction:
+
+```bash
+python3 tools/export_evidence_to_excel.py \
+  --config tools/evidence_export.tests.yaml \
+  --tests "T1=$INGESTION_SUFFIX" \
+  --redact-local-paths \
+  --export-dir reports/exports/redact_on \
+  --strict
+```
+
+Disable local-path redaction (controlled internal review only):
+
+```bash
+python3 tools/export_evidence_to_excel.py \
+  --config tools/evidence_export.tests.yaml \
+  --tests "T1=$INGESTION_SUFFIX" \
+  --no-redact-local-paths \
+  --export-dir reports/exports/redact_off \
+  --verbose
+```
+
+Timestamp suffix on explicit output name:
+
+```bash
+python3 tools/export_evidence_to_excel.py \
+  --config tools/evidence_export.tests.yaml \
+  --tests "T1=$INGESTION_SUFFIX" \
+  --output reports/exports/manual_ingestion.xlsx \
+  --timestamp-suffix \
+  --strict
+```
+
+Explicit packager ZIP output:
+
+```bash
+python3 tools/package_evidence_bundle.py \
+  --config tools/evidence_export.tests.yaml \
+  --tests "T1=$INGESTION_SUFFIX" \
+  --output reports/exports/manual_ingestion.zip \
+  --strict
+```
+
+## Dry-run
+
+```bash
+python3 tools/package_evidence_bundle.py \
+  --config tools/evidence_export.tests.yaml \
+  --tests "$COMPLETE_TESTS" \
+  --excel "$COMPLETE_WORKBOOK" \
+  --dry-run \
+  --verbose
+```
+
+## CLI flags
+
+### `export_evidence_to_excel.py`
+
+```text
+--config --tests --preset --only-tests --repo-root --evidence-dir --downloads-dir
+--output --export-dir --timestamp --timestamp-suffix --strict --profile
+--sanitize-connectors / --no-sanitize-connectors
+--redact-local-paths / --no-redact-local-paths --verbose --help
+```
+
+### `package_evidence_bundle.py`
+
+```text
+--config --tests --preset --only-tests --excel --output --export-dir --timestamp
+--timestamp-suffix --repo-root --profile --include-downloaded-assets
+--sanitize-connectors / --no-sanitize-connectors
+--redact-local-paths / --no-redact-local-paths --strict --dry-run --verbose --help
+```
+
+Example overrides:
+
+```bash
+python3 tools/export_evidence_to_excel.py \
+  --config tools/evidence_export.tests.yaml \
+  --tests "T1=$INGESTION_SUFFIX" \
+  --repo-root "$(pwd)" \
+  --evidence-dir evidencias/runs \
+  --downloads-dir downloads \
+  --output reports/exports/manual.xlsx \
+  --strict
+```
+
+## `--include-downloaded-assets`
+
+Exists on the packager only. Use for controlled internal review after checking asset classification and publication profile. Do not share externally merely because the command succeeds.
+
+```bash
+python3 tools/package_evidence_bundle.py \
+  --config tools/evidence_export.tests.yaml \
+  --tests "$TESTS" \
+  --include-downloaded-assets \
+  --dry-run \
+  --verbose
+```
+
+## Publication status
+
+```text
+package.publication_ready = all included slots are publication_safe
+```
+
+- Ingestion API v2: `minimal_publication` / potentially `publication_safe=true`
+- WFS / SPARQL / CSV-B2: `standard` / `publication_safe=false` for automatic external publication
+
+PROD POST metadata-only runs must not require response download or SHA-256 in the exporter.
 
 ## Tests
 
+From repository root:
+
 ```bash
-conda activate data_spaces_310
-cd tools/tests && PYTHONPATH=.. python -m unittest discover -v
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest \
+  tools.tests.test_evidence_export \
+  tools.tests.test_dataspace_resolution \
+  tools.tests.test_ingesta_api_post_support \
+  -v
+```
+
+Historical discover suite:
+
+```bash
+cd tools/tests && PYTHONPATH=.. python3 -m unittest discover -v
+```
+
+## Help
+
+```bash
+python3 tools/export_evidence_to_excel.py --help
+python3 tools/package_evidence_bundle.py --help
 ```

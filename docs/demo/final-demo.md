@@ -4,7 +4,7 @@
 
 ### Objective
 
-Demonstrate a controlled IPPCP data exchange from provider publication through consumer download and verification. The demonstration must make the business result, connector responsibilities, security boundaries, and resulting traceability understandable without exposing operational secrets or sensitive payloads.
+Demonstrate a controlled IPPCP data exchange from provider publication through consumer Data Plane consumption and technical result verification. The demonstration must make the business result, connector responsibilities, security boundaries, and resulting traceability understandable without exposing operational secrets or sensitive payloads.
 
 ### Intended audience
 
@@ -23,8 +23,8 @@ At the end of the demonstration, the audience should be able to explain:
 - what resource the provider made available;
 - how the consumer discovered and negotiated access;
 - how transfer and Data Plane delivery differ from direct credential sharing;
-- what result was downloaded and semantically validated;
-- how the run summary, manifest, byte count, and SHA-256 provide traceability;
+- what result was obtained and verified (materialized download or POST metadata-only control artifacts);
+- how the run summary, manifest or POST control metadata, byte counts, and SHA-256 (where applicable) provide traceability;
 - which capabilities are validated and which remain planned.
 
 ## Demo roles
@@ -51,26 +51,20 @@ The demo must not publish usernames, passwords, tokens, API keys, or other crede
 
 ### Validated demo variants
 
-The demo supports three validated variants:
+The demo supports these validated variants:
 
-- **Ingestion API v2:** protected JSON resource using `HttpData-PULL`; maps naturally to the intake narrative in business Phase A.
+- **Ingestion API PRE GET:** validated end-to-end intake path with materialized JSON download; maps to business Phase A.
+- **Ingestion API PROD POST (Industrias Ebro):** validated production intake path; `HttpData-PULL` with upstream POST and POST metadata-only phase 4; maps to business Phase A.
 - **WFS:** GeoJSON resource using `HttpData-PULL`; supports the resource-consumption narrative in business Phase B.
 - **SPARQL JSON:** SPARQL Results JSON using `HttpData-PULL`; supports the semantic-resource narrative in business Phase B.
 
-The primary variant is selected during readiness review according to:
+**CIRCE PROD** is validated through phases 0–3 only. Phase 4 requires a CIRCE-specific request body; do not reuse the Industrias Ebro payload or present CIRCE phase 4 as validated without it.
 
-- the intended audience;
-- the demo objective;
-- the available environment;
-- the desired business narrative.
-
-The selected primary variant is the main live path. The other validated variants remain alternatives and potential contingencies.
+The primary variant is selected during readiness review according to audience, objective, environment, and business narrative. **PROD POST / Industrias Ebro** is the recommended primary technical narrative when the environment supports it. The other validated variants remain alternatives and contingencies.
 
 ### Delivered baseline evidence
 
-T1 is the delivered CSV/B2/InesDataStore evidence baseline. It is legacy-supported project material and is not the recommended path for a new live integration.
-
-T2 is delivered WFS evidence, T3 is delivered SPARQL evidence, and T4 is additional validated Ingestion API v2 integration. T4 does not replace or reinterpret T1.
+T1–T4 are presentation slots, not asset types. Historical delivered assessment evidence may occupy slots via `--preset legacy_assessment`. CSV/B2 remains a preserved baseline and is not the current workshop path.
 
 ### Planned or non-demonstrated capabilities
 
@@ -80,7 +74,7 @@ Unless separately implemented and validated before the readiness decision, the l
 - automated onboarding, offboarding, revocation, or credential rotation;
 - a validated Phase C technical workflow;
 - automated API-key rotation;
-- PRO/POST validation;
+- CIRCE PROD phase 4 without a CIRCE-specific request body;
 - SPARQL graph consumption;
 - formal KPI or assessment compliance.
 
@@ -88,7 +82,7 @@ Unless separately implemented and validated before the readiness decision, the l
 
 ### Business Phase A: Intake
 
-An external company or data provider interacts with the intended municipal intake context. The current technical demonstration can validate the Ingestion API v2 exchange, while the final integrated company-facing form and backend remain planned.
+An external company or data provider interacts with the intended municipal intake context. The current technical demonstration validates the Ingestion API v2 exchange — **PRE GET** (phases 0–4, materialized response) and **PROD POST / Industrias Ebro** (phases 0–4, POST metadata-only) — while the final integrated company-facing form and backend remain planned.
 
 ### Business Phase B: Consume
 
@@ -106,7 +100,7 @@ Business Phase A–C and the technical script phases are different views. The se
 2. `phase1` publishes the provider policies, asset, data address, and contract definition.
 3. `phase2` discovers the offer, negotiates access, and obtains an agreement.
 4. `phase3` starts the transfer and retrieves an EDR.
-5. `phase4` retrieves a current EDR, downloads through the Data Plane, and writes traceability artifacts. The selected flow's operator block then applies semantic validation.
+5. `phase4` retrieves a current EDR and completes Data Plane consumption. **Materialized-response** flows (PRE GET, WFS, SPARQL) persist a download with manifest and SHA-256. **PROD POST** persists HTTP/control metadata only (`post_result.json` / `post_manifest.json`); request and response bodies are not stored. The selected flow guide's operator block then applies the applicable validation checks.
 
 The municipal application Keycloak shown in the architecture diagram is separate from EdD Keycloak. The former supports the municipal application and its external users; the latter authenticates technical users to connector Management APIs.
 
@@ -140,13 +134,13 @@ Show sanitized phase status indicating catalog discovery, negotiation finalizati
 
 Explain that transfer initiation creates the authorized consumption context. Show only redacted status or field names; never display EDR authorization.
 
-### 8. Download and validate in phase4
+### 8. Consume and validate in phase4
 
-Explain that phase4 retrieves a current EDR, calls the Data Plane, and materializes the response. Then run the selected flow guide's semantic validation.
+Explain that phase4 retrieves a current EDR and calls the Data Plane. For materialized-response variants, show the download and run semantic validation. For PROD POST, show sanitized POST control metadata (HTTP status, `manifest_kind=post_metadata_only`) — not a fake download, manifest, or response SHA-256.
 
-### 9. Present summary, manifest, and SHA-256
+### 9. Present summary and traceability artifacts
 
-Show a sanitized summary structure and manifest fields. Explain byte count and SHA-256 as integrity and traceability concepts without displaying a real run hash.
+Show a sanitized summary structure. For materialized-response flows, show manifest field names, byte count, and the SHA-256 concept. For PROD POST, show safe POST metadata fields only.
 
 ### 10. Explain the business result and traceability
 
@@ -184,23 +178,29 @@ Do not reconstruct or combine commands from different variants in this guide. Th
 - Transfer creation is accepted.
 - An EDR can be resolved for the selected agreement without exposing authorization.
 
-### Download
+### Technical result
 
-- Phase4 materializes a non-empty response through the Data Plane.
-- The output path belongs to the selected run and asset.
+- **Materialized response:** phase4 persists a non-empty response through the Data Plane; manifest and SHA-256 apply.
+- **PROD POST metadata-only:** phase4 records HTTP 2xx control metadata; no GET-style download or response SHA-256 is required.
 
-### Semantic content validation
+### Semantic content validation (materialized-response flows)
 
-- Ingestion API: non-empty valid JSON.
+- PRE GET Ingestion API: non-empty valid JSON.
 - WFS: valid GeoJSON with the expected `FeatureCollection` structure.
 - SPARQL: valid SPARQL Results JSON with `head` and `results.bindings`.
+
+### POST metadata validation (PROD POST)
+
+- HTTP 2xx recorded in `post_result.json` / `post_manifest.json`.
+- `manifest_kind=post_metadata_only`; `download_persisted=false`; no request/response bodies in evidence.
 
 ### Evidence generation
 
 - `summary.json` reflects the completed phase sequence.
 - Run-specific phase artifacts exist.
-- The manifest records the file, byte count, and SHA-256.
-- Publicly shown material is sanitized and contains no authorization value.
+- Materialized flows: manifest records file, byte count, and SHA-256.
+- PROD POST: safe POST control metadata only.
+- Publicly shown material is sanitized and contains no authorization value or business POST body.
 
 ## Evidence shown during the demo
 
@@ -209,9 +209,9 @@ The presentation may show only reviewed and sanitized material:
 - phase status and timestamps at an appropriate level;
 - placeholder asset, contract, negotiation, agreement, and transfer identifiers;
 - the field structure of `summary.json`;
-- manifest field names;
-- byte count;
-- the SHA-256 concept;
+- manifest field names (materialized flows) or POST metadata field names (PROD POST);
+- byte count where applicable;
+- the SHA-256 concept for materialized-response flows only;
 - redacted screenshots;
 - prepared outputs that contain no business-sensitive payload.
 
@@ -251,11 +251,11 @@ See [Troubleshooting](../troubleshooting.md) for implemented restart and recover
 
 ## Known limitations
 
-- **Validated:** Ingestion API v2, WFS, and SPARQL Results JSON technical exchanges.
-- **Delivered baseline:** T1 CSV/B2 evidence remains preserved.
+- **Validated:** Ingestion API PROD POST (Industrias Ebro phases 0–4), PRE GET, WFS, and SPARQL Results JSON technical exchanges; CIRCE PROD phases 0–3.
+- **Delivered baseline:** historical CSV/B2 evidence remains preserved (`--preset legacy_assessment`).
 - **Legacy-supported:** v1 and the CSV/B2 technical path are not recommended for new integration.
-- **Planned:** final integrated backends, automated lifecycle management, Phase C technical realization, automated API-key rotation, and finalized T4 evidence export.
-- **Out of current scope:** PRO/POST validation and SPARQL graph consumption.
+- **Planned:** final integrated backends, automated lifecycle management, Phase C technical realization, and automated API-key rotation.
+- **Pending / N/A:** CIRCE PROD phase 4 until a CIRCE-specific request body exists; SPARQL graph consumption.
 
 ## Related documentation
 

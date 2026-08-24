@@ -272,14 +272,34 @@ Direct EDR retrieval is attempted first. The script can query the EDR collection
 
 Script: [`scripts/phase4_save_download.sh`](../scripts/phase4_save_download.sh)
 
-### Purpose
+Phase 4 has two result modes. Both use the same EDC transfer type (`HttpData-PULL`); the difference is upstream HTTP method and what is persisted locally.
+
+### Result — materialized response
+
+Used by PRE GET Ingestion API, WFS, and SPARQL:
 
 - re-authenticates the consumer;
 - retrieves the current EDR;
-- downloads data through the Data Plane;
-- validates the response;
-- creates a manifest and SHA-256 hash;
+- performs a Data Plane GET;
+- persists the response body locally;
+- creates a download artifact, manifest, and SHA-256 hash;
 - updates the run summary.
+
+### Result — POST metadata-only
+
+Used by PROD Ingestion API:
+
+- re-authenticates the consumer;
+- retrieves the current EDR;
+- sends a POST with a local request body file (`INGESTA_API_REQUEST_BODY_FILE`);
+- persists HTTP result/control metadata only (`post_result.json`, `post_manifest.json`);
+- does **not** persist request or response bodies;
+- does **not** create a GET-style download under `downloads/assets/` or a response SHA-256;
+- success is `curl` exit 0 plus HTTP 2xx.
+
+See [Ingestion API](flows/ingestion-api.md) for PROD POST operator checks and CIRCE stop conditions.
+
+### Purpose (common)
 
 ### Inputs
 
@@ -290,7 +310,7 @@ Script: [`scripts/phase4_save_download.sh`](../scripts/phase4_save_download.sh)
 
 Phase 4 retrieves the EDR again at runtime. It does not require a stored EDR credential.
 
-For the Ingestion API, execute phase 4 normally. The provider asset data address already contains `X-Api-Key` and `X-Provider-Id` for the Data Plane-to-upstream request. The historical upstream JWT mode is not part of a clean current v2 execution.
+For PRE GET Ingestion API, WFS, and SPARQL, execute phase 4 normally. The provider asset data address already contains upstream configuration for the Data Plane request. For PROD POST Ingestion API, set `INGESTA_API_REQUEST_BODY_FILE` before phase 4. The historical upstream JWT mode is not part of a clean current v2 execution.
 
 ### EDR authorization behavior
 
@@ -300,7 +320,7 @@ The scripts can internally try `authKey`/`authCode`, Bearer-prefixed, or explici
 
 ### Outputs
 
-Phase 4 creates:
+**Materialized response** creates:
 
 ```text
 evidencias/runs/${SUFFIX}/phase4/40_data_response.${ASSET_EXTENSION}
@@ -308,9 +328,18 @@ downloads/assets/${ASSET_ID}/latest.${ASSET_EXTENSION}
 downloads/manifests/${ASSET_ID}/latest.manifest.json
 ```
 
-The manifest includes the SHA-256 hash and traceability metadata. The run `summary.json` records phase 4 completion.
+The manifest includes the SHA-256 hash and traceability metadata.
 
-Phase 4 does not create `phase4_env.sh`.
+**POST metadata-only** creates control metadata such as:
+
+```text
+evidencias/runs/${SUFFIX}/phase4/post_result.json
+evidencias/runs/${SUFFIX}/phase4/post_manifest.json
+```
+
+It does not create GET-style downloads or a response SHA-256.
+
+The run `summary.json` records phase 4 completion in both modes. Phase 4 does not create `phase4_env.sh`.
 
 ### Evidence
 
@@ -320,9 +349,8 @@ Representative phase 4 artifacts include:
 - redacted runtime EDR data address;
 - EDR key-name diagnostics;
 - per-attempt response artifacts and status summary;
-- the accepted material response;
-- response headers and HTTP metadata;
-- download manifest and SHA-256 metadata.
+- **materialized response:** the accepted material response, download manifest, and SHA-256 metadata;
+- **POST metadata-only:** `post_result.json` / `post_manifest.json` with `manifest_kind=post_metadata_only`, HTTP status, and byte counts — not request/response bodies.
 
 ## Environment hand-off
 

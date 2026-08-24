@@ -2,7 +2,7 @@
 
 This repository contains command-line automation for validating IPPCP data exchanges through an INESData data space.
 
-A provider publishes an asset. A consumer discovers it, negotiates access, starts a transfer, retrieves an Endpoint Data Reference (EDR), and materializes an authorized local download.
+A provider publishes an asset. A consumer discovers it, negotiates access, starts a transfer, retrieves an Endpoint Data Reference (EDR), and completes authorized Data Plane consumption. Depending on the asset profile, phase 4 either materializes a local download with manifest and SHA-256 (PRE GET Ingestion API, WFS, SPARQL) or records POST execution metadata only (PROD Ingestion API).
 
 The current implementation is operated through Bash phase scripts. A final backend API is not presented as implemented.
 
@@ -18,7 +18,7 @@ That document is the Golden Path: machine setup, local credentials, Phase 0 thro
 
 Current assets use `v2` `HttpData-PULL`:
 
-- Ingestion API v2
+- Ingestion API v2 — **PRE GET** (validated phases 0–4, materialized response) and **PROD POST** (Industrias Ebro validated phases 0–4; CIRCE validated through phase 3)
 - WFS city
 - WFS districts / juntas
 - SPARQL Results JSON

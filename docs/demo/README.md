@@ -28,7 +28,7 @@ This package supports public-safe explanation, preparation, and demonstration of
 
 ## Status vocabulary
 
-- **Validated:** demonstrated end-to-end with a materialized phase4 result and verified manifest.
+- **Validated:** demonstrated end-to-end with a successful phase 4 technical result — materialized download with verified manifest (materialized response) or POST metadata-only with HTTP 2xx.
 - **Partially validated:** one or more technical parts are validated, while the complete user-facing or integrated capability is not.
 - **Planned:** intended future capability that is not presented as implemented.
 - **Legacy-supported:** retained project material that is not recommended for new integration.

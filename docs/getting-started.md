@@ -4,7 +4,7 @@ This is a reference document. The executable Golden Path from a clean clone is [
 
 ## Purpose
 
-This guide records setup details, flow selection, and result locations for the IPPCP API automation. The repository publishes upstream resources through provider and consumer data-space connectors, negotiates access, obtains an Endpoint Data Reference (EDR), and materializes an authorized local download.
+This guide records setup details, flow selection, and result locations for the IPPCP API automation. The repository publishes upstream resources through provider and consumer data-space connectors, negotiates access, obtains an Endpoint Data Reference (EDR), and completes authorized Data Plane consumption. Phase 4 has two result modes: **materialized response** (PRE GET Ingestion API, WFS, SPARQL — download, manifest, SHA-256) and **POST metadata-only** (PROD Ingestion API — HTTP 2xx control metadata, no persisted request/response bodies). Both Ingestion API profiles remain `HttpData-PULL`.
 
 ## Supported flows
 
@@ -16,7 +16,7 @@ The current public flows are:
 
 `v2` is current and recommended. `v1` remains legacy-supported but is not used by this guide. `test3`, discarded experiments, upstream JWT authentication, and old workshop procedures are non-current.
 
-The available PRE profile has been validated end-to-end. PRE is an environment profile, not a universal deployment requirement; another environment needs its own connector and upstream configuration.
+The PRE GET profile and PROD POST profile (Industrias Ebro phases 0–4; CIRCE phases 0–3) are validated Ingestion API paths. PRE and PROD are environment profiles, not universal deployment requirements; another environment needs its own connector and upstream configuration.
 
 ## Prerequisites
 
@@ -81,13 +81,14 @@ See [Authentication](authentication.md) for credential ownership, token lifetime
 
 Upstream secrets are separate from EdD connector credentials and are required only by flows whose provider resource needs them.
 
-The current Ingestion API profile requires a provider-side API key and numeric provider identifier during phase 1. Create its ignored local environment from:
+The current Ingestion API profiles require a provider-side API key during phase 1. PRE GET also requires a numeric provider identifier when the config does not embed `provider_id`. Create ignored local environments from:
 
 ```text
-data/real/ingesta/auth/ingesta_api_key.env.example
+data/real/ingesta/auth/ingesta_api_key.env.example       # PRE GET
+data/real/ingesta/auth/ingesta_api_key_prod.env.example  # PROD POST
 ```
 
-The [Ingestion API guide](flows/ingestion-api.md) defines when to source and remove those variables. WFS and SPARQL do not use the Ingestion API secret file.
+PROD POST phase 4 additionally requires a local request body file via `INGESTA_API_REQUEST_BODY_FILE` (not versioned in Git). The [Ingestion API guide](flows/ingestion-api.md) defines when to source and remove those variables. WFS and SPARQL do not use the Ingestion API secret files.
 
 ## Select dataspace, flow, and version
 
@@ -179,9 +180,9 @@ At a high level:
 2. phase 1 publishes the provider asset and offer;
 3. phase 2 negotiates and obtains the agreement;
 4. phase 3 starts the transfer and retrieves an EDR;
-5. phase 4 re-fetches the EDR, downloads data, and writes a manifest.
+5. phase 4 re-fetches the EDR and completes Data Plane consumption — either materializing a download with manifest and SHA-256, or recording POST metadata-only control artifacts.
 
-[Execution phases](execution-phases.md) is the canonical source for inputs, outputs, inherited variables, and implemented restart controls.
+[Execution phases](execution-phases.md) is the canonical source for inputs, outputs, inherited variables, phase 4 result modes, and implemented restart controls.
 
 ## Locate the results
 
@@ -202,11 +203,13 @@ evidencias/runs/${SUFFIX}/phase1/
 evidencias/runs/${SUFFIX}/phase2/
 evidencias/runs/${SUFFIX}/phase3/
 evidencias/runs/${SUFFIX}/phase4/
-downloads/assets/${ASSET_ID}/${SUFFIX}.${ASSET_EXTENSION}
-downloads/manifests/${ASSET_ID}/${SUFFIX}.manifest.json
+downloads/assets/${ASSET_ID}/${SUFFIX}.${ASSET_EXTENSION}          # materialized-response flows only
+downloads/manifests/${ASSET_ID}/${SUFFIX}.manifest.json            # materialized-response flows only
+evidencias/runs/${SUFFIX}/phase4/post_result.json                  # PROD POST metadata-only
+evidencias/runs/${SUFFIX}/phase4/post_manifest.json                # PROD POST metadata-only
 ```
 
-`summary.json` records phase and step status. Phase artifacts retain request results, HTTP status, and redacted diagnostics. The manifest correlates the asset, agreement, transfer, byte count, media type, and SHA-256.
+`summary.json` records phase and step status. Phase artifacts retain request results, HTTP status, and redacted diagnostics. For materialized-response flows, the download manifest correlates the asset, agreement, transfer, byte count, media type, and SHA-256. For PROD POST metadata-only phase 4, inspect `post_result.json` / `post_manifest.json` (`manifest_kind=post_metadata_only`); do not expect a GET-style download or response SHA-256.
 
 `latest.*` files are mutable local conveniences. Use the run-specific download, manifest, asset ID, and run metadata for durable traceability.
 

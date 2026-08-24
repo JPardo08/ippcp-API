@@ -10,7 +10,7 @@ It is based on the validated repository implementation and the project context a
 
 Organizations involved in urban sustainability need to exchange data across institutional boundaries. Data may originate in company submissions, municipal systems, geospatial services, or semantic data services. The receiving organization needs to know what was offered, under which conditions it was accessed, and whether the delivered result can be traced to the corresponding exchange.
 
-IPPCP applies data-space mechanisms to this problem. The current implementation demonstrates how a provider publishes a data offer and how a consumer discovers, negotiates, transfers, downloads, and verifies the resource through INESData-compatible connector infrastructure.
+IPPCP applies data-space mechanisms to this problem. The current implementation demonstrates how a provider publishes a data offer and how a consumer discovers, negotiates, transfers, consumes through the Data Plane, and verifies the technical result through INESData-compatible connector infrastructure.
 
 ## Problem being addressed
 
@@ -21,8 +21,8 @@ A direct application-to-application call can move data, but it does not by itsel
 - separating provider and consumer responsibilities;
 - negotiating access before delivery;
 - keeping upstream credentials outside the consumer boundary;
-- correlating publication, agreement, transfer, download, and evidence;
-- validating the delivered representation.
+- correlating publication, agreement, transfer, phase 4 result, and evidence;
+- validating materialized representations or POST control metadata as applicable;
 
 IPPCP addresses these needs through controlled data exchange. The current automation focuses on a reproducible technical path while the final integrated municipal and company backends remain planned.
 
@@ -55,7 +55,7 @@ For the protected Ingestion API flow, `X-Api-Key` and `X-Provider-Id` belong to 
 
 The intended business journey gives companies a clear route to make data available through a governed municipal context. Data-space publication can expose an agreed resource without requiring the company-facing application to distribute connector credentials or provider upstream secrets to consumers.
 
-For current demonstrations, the repository validates the connector and transfer mechanics. Final company-facing forms, integrated backends, and automated account lifecycle management are planned components.
+For current demonstrations, the repository validates connector and transfer mechanics including **PROD POST** (Industrias Ebro) and **PRE GET** intake paths. Final company-facing forms, integrated backends, and automated account lifecycle management are planned components.
 
 ### Value for the City Council
 
@@ -64,8 +64,8 @@ The City Council can:
 - publish controlled resources through its provider connector;
 - discover and negotiate offers through the consumer role where required by the scenario;
 - use repeatable WFS, SPARQL, and Ingestion API exchanges;
-- retain run-level evidence for publication, negotiation, transfer, and download;
-- verify the downloaded representation semantically;
+- retain run-level evidence for publication, negotiation, transfer, and phase 4 results;
+- verify materialized downloads or POST metadata-only outcomes as applicable;
 - distinguish validated technical behavior from future application integration.
 
 ### Role of the IPPCP data space
@@ -82,7 +82,8 @@ The implementation is developed in the context of the IPPCP project and its INES
 
 All current recommended flows use `IPPCP_FLOW_VERSION=v2` and `HttpData-PULL`:
 
-- **Ingestion API:** protected JSON resource whose upstream headers remain provider-side.
+- **Ingestion API PRE GET:** protected JSON resource; materialized phase 4 download.
+- **Ingestion API PROD POST:** upstream POST with `proxyBody=true`; metadata-only phase 4 (Industrias Ebro validated phases 0–4; CIRCE validated through phase 3).
 - **WFS:** GeoJSON resources exposed by the selected WFS layer.
 - **SPARQL:** SPARQL Results JSON requested explicitly by the canonical configuration.
 
@@ -100,7 +101,7 @@ The high-level use case combines:
 - the Data Plane and EDR-based consumption path;
 - Ingestion API, WFS, and SPARQL upstream resources;
 - the current Bash `phase0` through `phase4` automation;
-- run-level summaries, evidence, manifests, byte counts, and SHA-256 verification;
+- run-level summaries, evidence, manifests (materialized flows), POST control metadata (PROD POST), byte counts, and SHA-256 verification where applicable;
 - planned provider and consumer backend integrations.
 
 The two Keycloak scopes are separate. Municipal application authentication does not authenticate connector Management API operations, and EdD technical-user credentials are not end-user application credentials.
@@ -113,7 +114,7 @@ The diagram is a high-level functional and infrastructure view, not an exhaustiv
 
 ### Phase A: Intake
 
-Phase A represents the intended company-facing intake journey through the municipal platform. The current technical package validates the Ingestion API data-space exchange, while the final integrated form and backend journey remains planned.
+Phase A represents the intended company-facing intake journey through the municipal platform. The current technical package validates the Ingestion API data-space exchange through **PRE GET** (phases 0–4, materialized response) and **PROD POST (Industrias Ebro)** (phases 0–4, POST metadata-only) as first-class validated intake paths. **PROD POST (Industrias Ebro)** is the recommended primary demo narrative when the environment supports it. The final integrated form and backend journey remains planned.
 
 ### Phase B: Consume
 
@@ -131,7 +132,7 @@ Business `PHASE A` through `PHASE C` describe use-case stages. They are distinct
 phase0 -> phase1 -> phase2 -> phase3 -> phase4
 ```
 
-The script phases resolve context and authentication, publish the offer, negotiate an agreement, initiate transfer and retrieve an EDR, then download and verify the resource. See [Execution phases](../execution-phases.md).
+The script phases resolve context and authentication, publish the offer, negotiate an agreement, initiate transfer and retrieve an EDR, then complete authorized Data Plane consumption and technical result verification. See [Execution phases](../execution-phases.md).
 
 ## Capability and evidence status
 
@@ -139,19 +140,19 @@ Technical status and evidence role are separate. A delivered evidence baseline d
 
 | Flow or capability | Technical status | Evidence role |
 | --- | --- | --- |
-| Ingestion API v2 through `HttpData-PULL` | Validated | T4 additional validation |
-| WFS exchange | Validated | T2 delivered evidence |
-| SPARQL Results JSON exchange | Validated | T3 delivered evidence |
-| CSV/B2/InesDataStore path | Legacy-supported | T1 delivered baseline; not recommended for new integrations |
+| Ingestion API PROD POST (Industrias Ebro) | Validated (phases 0–4, metadata-only phase 4) | Classified from run; slot assignment is arbitrary (`--tests SLOT=SUFFIX`) |
+| Ingestion API PRE GET | Validated | Classified from run; slot assignment is arbitrary |
+| Ingestion API PROD POST (CIRCE) | Partially validated (phases 0–3; phase 4 pending CIRCE-specific body) | No phase 4 claim without CIRCE payload |
+| WFS exchange | Validated | Classified from run |
+| SPARQL Results JSON exchange | Validated | Classified from run |
+| CSV/B2/InesDataStore path | Legacy-supported | Historical delivered baseline (`--preset legacy_assessment`); not recommended for new integrations |
 | v1 project path | Legacy-supported | Compatibility material; not the current recommended path |
 | Final integrated provider and consumer backends | Planned | No completed backend evidence |
 | Automated onboarding and offboarding | Planned | No completed lifecycle-automation evidence |
 | Phase C technical realization | Planned | Business-stage intent only |
-| PRO/POST validation | Out of current scope | No claim in the current validated package |
 | SPARQL graph configuration | Out of current scope | The validated SPARQL representation is SPARQL Results JSON |
-| Automated T4 evidence export | Planned | T4 remains additional validation and does not replace T1 |
 
-T1 is the delivered CSV-based ingestion baseline. T2 is delivered WFS evidence, T3 is delivered SPARQL evidence, and T4 is an additional validated Ingestion API v2 integration. T4 does not replace, reinterpret, or relabel T1.
+T1–T4 are presentation slots, not asset types. The tool classifies each run and applies that asset's `publication_profile`. CSV/B2 remains a preserved historical baseline; it is not the current workshop path.
 
 ## Security and traceability principles
 
@@ -164,7 +165,8 @@ The current implementation follows these principles:
 - `run_id`, currently represented by `SUFFIX`, correlates the technical execution;
 - connector and contract identifiers support continuation and audit;
 - phase summaries record observable status without publishing secrets;
-- the phase 4 manifest records the materialized file, byte count, and SHA-256;
+- the phase 4 manifest records the materialized file, byte count, and SHA-256 where applicable;
+- PROD POST phase 4 records HTTP/control metadata only — not request/response bodies;
 - public evidence must be explicitly sanitized and approved.
 
 See [Authentication](../authentication.md) and [Evidence and traceability](../evidence-and-traceability.md) for the canonical rules.
@@ -177,12 +179,13 @@ The current package supports:
 - provider publication of policies, assets, data addresses, and contract definitions;
 - consumer catalog discovery and contract negotiation;
 - transfer initiation and EDR retrieval;
-- authorized Data Plane download;
-- flow-specific semantic validation;
-- run-level summary, manifest, byte-count, and SHA-256 generation;
-- end-to-end validated Ingestion API, WFS, and SPARQL JSON variants.
+- authorized Data Plane consumption;
+- flow-specific semantic validation for materialized-response flows;
+- POST metadata-only validation for PROD Ingestion API;
+- run-level summary, manifest or POST control metadata, byte-count, and SHA-256 generation where applicable;
+- end-to-end validated Ingestion API PROD POST (Industrias Ebro), PRE GET, WFS, and SPARQL JSON variants; CIRCE PROD through phase 3.
 
-Validation means that the technical path completed with a materialized phase 4 result and verified manifest. It does not imply completion of every planned application, lifecycle, or production deployment capability.
+Validation means the technical path completed with a successful phase 4 result — materialized download with verified manifest (materialized response) or POST metadata-only with HTTP 2xx. It does not imply completion of every planned application, lifecycle, or production deployment capability.
 
 ## Limitations and planned components
 
@@ -196,8 +199,7 @@ The following remain planned or outside the current validated package:
 - automated onboarding, offboarding, revocation, and credential rotation;
 - automated API-key rotation for immutable assets;
 - a validated Phase C technical workflow;
-- PRO/POST validation;
-- SPARQL graph consumption;
-- finalized automated export of T4 evidence.
+- CIRCE PROD phase 4 without a CIRCE-specific request body;
+- SPARQL graph consumption.
 
 Future implementations must preserve the current security boundaries and state sequence described in [Backend integration](../backend-integration.md).
