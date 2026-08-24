@@ -261,3 +261,126 @@ def complete_override(order: Iterable[str]) -> str:
     return tests_override(
         {f"T{index}": ASSET_FIXTURES[key]["suffix"] for index, key in enumerate(order, 1)}
     )
+
+
+def create_ingestion_post_metadata_run(
+    root: Path,
+    *,
+    suffix: str = "synthetic-ingestion-post",
+    slug: str = "ippcp_ingesta_pull_industrias_ebro_prod",
+    asset_config: str = "asset_configs/real/ingesta/ingesta_api_pull_industrias_ebro_prod.json",
+    http_status: int = 200,
+    request_body_persisted: bool = False,
+    response_body_persisted: bool = False,
+    download_persisted: bool = False,
+    status: str = "ok",
+    manifest_kind: str = "post_metadata_only",
+    include_post_result: bool = True,
+    include_post_manifest: bool = True,
+    with_canaries: bool = False,
+) -> Path:
+    """Synthetic ingestion_api_v2 POST metadata-only run (no download/sha256/payload)."""
+    run = root / "evidencias" / "runs" / suffix
+    # Stable synthetic ids — not copied from real PROD evidence.
+    asset_id = "ippcp-ingesta-pull-industrias-ebro-prod"
+    agreement_id = "00000000-0000-4000-8000-000000000001"
+    transfer_id = "00000000-0000-4000-8000-000000000002"
+    phases = _phases_for("b1", "ok")
+    create_step = {
+        "id": "create_asset",
+        "status": "ok",
+        "asset_id": asset_id,
+        "asset_slug": slug,
+        "asset_config": asset_config,
+        "content_kind": "json",
+        "extension": "json",
+        "media_type": "application/json",
+        "http_method": "POST",
+        "proxy_body": True,
+        "requires_api_key_header": True,
+        "requires_provider_id_header": True,
+    }
+    phases["phase1"]["steps"] = [create_step]
+    phases["phase3"]["steps"] = [
+        {
+            "id": "transfer_type_valid",
+            "status": "ok",
+            "transfer_type": "HttpData-PULL",
+        },
+        {
+            "id": "transfer_final_state",
+            "status": "ok",
+            "final_state": "COMPLETED",
+            "transfer_type": "HttpData-PULL",
+        },
+    ]
+    phases["phase4"]["steps"] = [
+        {
+            "id": "post_result",
+            "status": status,
+            "operation": "POST",
+            "http_method": "POST",
+            "http_status": http_status,
+            "request_body_persisted": request_body_persisted,
+            "response_body_persisted": response_body_persisted,
+            "download_persisted": download_persisted,
+            "manifest": "phase4/post_manifest.json" if include_post_manifest else "",
+            "result_artifact": "phase4/post_result.json" if include_post_result else "",
+        }
+    ]
+    summary = {
+        "suffix": suffix,
+        "ds_name": "synthetic",
+        "started_at": "2026-08-21T00:00:00Z",
+        "phases": phases,
+    }
+    if with_canaries:
+        summary["jwt"] = "eyJFAKECANARYTOKEN0123456789"
+        phases["phase4"]["steps"][0]["authorization"] = "Bearer CANARY-AUTHORIZATION"
+    write_json(run / "summary.json", summary)
+    post_common = {
+        "operation": "POST",
+        "http_method": "POST",
+        "http_status": http_status,
+        "response_bytes": 32,
+        "response_media_type": "application/json",
+        "response_body_persisted": response_body_persisted,
+        "request_body_persisted": request_body_persisted,
+        "request_body_bytes": 16,
+        "download_persisted": download_persisted,
+        "auth_candidate_label": "authorization",
+        "status": status,
+        "created_at": "2026-08-21T00:00:01Z",
+    }
+    if include_post_result:
+        write_json(run / "phase4" / "post_result.json", post_common)
+    if include_post_manifest:
+        write_json(
+            run / "phase4" / "post_manifest.json",
+            {
+                **post_common,
+                "suffix": suffix,
+                "asset_id": asset_id,
+                "agreement_id": agreement_id,
+                "transfer_id": transfer_id,
+                "edr_url": "https://example.invalid/public",
+                "edr_url_redacted": False,
+                "manifest_kind": manifest_kind,
+            },
+        )
+    if with_canaries:
+        (run / "phase1_env.sh").write_text(
+            "export INGESTA_API_KEY=CANARY-API-KEY\n",
+            encoding="utf-8",
+        )
+        write_json(
+            run / "phase4" / "request_body.secret.json",
+            {"payload": "CANARY-REQUEST-BODY"},
+        )
+        write_json(
+            run / "phase4" / "response_body.secret.json",
+            {"payload": "CANARY-RESPONSE-BODY"},
+        )
+    for phase in phases:
+        write_json(run / phase / "status.json", {"status": phases[phase]["status"]})
+    return run

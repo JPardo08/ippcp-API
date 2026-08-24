@@ -1125,7 +1125,10 @@ export EDR_URL
 # D. Consumir endpoint final (legacy explícito)
 # ---------------------------------------------------------------------------
 
-if [[ "${PHASE3_TRY_DATA_CONSUMPTION:-0}" == "1" ]]; then
+if [[ "${PHASE3_TRY_DATA_CONSUMPTION:-0}" == "1" && "${ASSET_HTTP_METHOD:-}" == "POST" ]]; then
+  lib_write_summary 3 data_consumed skipped \
+    '{"reason":"PHASE3_TRY_DATA_CONSUMPTION skipped for POST assets; use phase4_save_download.sh with INGESTA_API_REQUEST_BODY_FILE","legacy_flag":"PHASE3_TRY_DATA_CONSUMPTION=1","http_method":"POST"}'
+elif [[ "${PHASE3_TRY_DATA_CONSUMPTION:-0}" == "1" ]]; then
   PHASE3_STEP="data_consumed"
   _phase3_consume_data_with_auth_candidates
 

@@ -466,6 +466,15 @@ _phase1_reject_b2_config() {
   fi
 }
 
+_phase1_validate_http_method_value() {
+  case "${1}" in
+    GET|POST) return 0 ;;
+    *)
+      lib_die "ASSET_CONFIG: http_method debe ser GET o POST (recibido: ${1})"
+      ;;
+  esac
+}
+
 _phase1_validate_asset_config() {
   local config_file="$1"
 
@@ -478,12 +487,16 @@ _phase1_validate_asset_config() {
     || lib_die "ASSET_CONFIG: requires_provider_id_header debe ser booleano"
   jq -e '(.requires_api_key_header // false) | type == "boolean"' "${config_file}" >/dev/null \
     || lib_die "ASSET_CONFIG: requires_api_key_header debe ser booleano"
+  jq -e '(.proxy_body // false) | type == "boolean"' "${config_file}" >/dev/null \
+    || lib_die "ASSET_CONFIG: proxy_body debe ser booleano"
 
-  local asset_type content_kind extension base_url
+  local asset_type content_kind extension base_url http_method provider_id
   asset_type="$(_phase1_jq_string "${config_file}" type)"
   content_kind="$(_phase1_jq_string "${config_file}" content_kind)"
   extension="$(_phase1_jq_string "${config_file}" extension)"
   base_url="$(_phase1_jq_string "${config_file}" base_url)"
+  http_method="$(jq -r '.http_method // empty | select(type == "string" and length > 0)' "${config_file}")"
+  provider_id="$(jq -r '.provider_id // empty | select(type == "string" or type == "number") | tostring | select(length > 0)' "${config_file}")"
 
   [[ "${asset_type}" == "HttpData" ]] \
     || lib_die "ASSET_CONFIG: type debe ser HttpData (recibido: ${asset_type})"
@@ -492,6 +505,13 @@ _phase1_validate_asset_config() {
   _phase1_validate_kind_extension_pair "${content_kind}" "${extension}"
   [[ "${base_url}" =~ ^https?:// ]] \
     || lib_die "ASSET_CONFIG: base_url debe empezar por http:// o https://"
+  if [[ -n "${http_method}" ]]; then
+    _phase1_validate_http_method_value "${http_method}"
+  fi
+  if [[ -n "${provider_id}" ]]; then
+    [[ "${provider_id}" =~ ^[0-9]+$ ]] \
+      || lib_die "ASSET_CONFIG: provider_id debe ser numérico (recibido: ${provider_id})"
+  fi
 }
 
 _phase1_set_legacy_asset_defaults() {
@@ -508,12 +528,15 @@ _phase1_set_legacy_asset_defaults() {
   export ASSET_KEYWORDS_JSON
   ASSET_REQUIRES_PROVIDER_ID_HEADER=0
   ASSET_REQUIRES_API_KEY_HEADER=0
+  ASSET_HTTP_METHOD=""
+  ASSET_PROXY_BODY=""
+  ASSET_PROVIDER_ID=""
   unset ASSET_CONFIG ASSET_SLUG
 }
 
 _phase1_validate_provider_id_header_env() {
   [[ -n "${INGESTA_API_PROVIDER_ID:-}" ]] \
-    || lib_die "INGESTA_API_PROVIDER_ID requerido porque ASSET_CONFIG declara requires_provider_id_header=true"
+    || lib_die "INGESTA_API_PROVIDER_ID requerido porque ASSET_CONFIG declara requires_provider_id_header=true y no define provider_id"
   [[ "${INGESTA_API_PROVIDER_ID}" =~ ^[0-9]+$ ]] \
     || lib_die "INGESTA_API_PROVIDER_ID debe ser numérico; no usar UUID de Keycloak."
 }
@@ -544,6 +567,7 @@ _phase1_load_asset_config() {
 
   local raw_slug safe_slug config_asset_id media_type content_kind extension
   local requires_provider_id_header requires_api_key_header
+  local http_method proxy_body config_provider_id
   raw_slug="$(_phase1_jq_string "${config_path}" asset_slug)"
   safe_slug="$(_phase1_sanitize_slug "${raw_slug}")"
   [[ -n "${safe_slug}" ]] || lib_die "ASSET_CONFIG: asset_slug inválido tras sanitizar"
@@ -564,12 +588,37 @@ _phase1_load_asset_config() {
     media_type="$(_phase1_default_media_type "${extension}")"
   fi
 
+  http_method="$(jq -r '.http_method // empty | select(type == "string" and length > 0)' "${config_path}")"
+  if [[ -n "${http_method}" ]]; then
+    _phase1_validate_http_method_value "${http_method}"
+    ASSET_HTTP_METHOD="${http_method}"
+  else
+    ASSET_HTTP_METHOD=""
+  fi
+
+  proxy_body="$(jq -r '.proxy_body // false' "${config_path}")"
+  if [[ "${proxy_body}" == "true" ]]; then
+    ASSET_PROXY_BODY=1
+  else
+    ASSET_PROXY_BODY=""
+  fi
+
+  config_provider_id="$(jq -r '.provider_id // empty | select(type == "string" or type == "number") | tostring | select(length > 0)' "${config_path}")"
   requires_provider_id_header="$(jq -r '.requires_provider_id_header // false' "${config_path}")"
   if [[ "${requires_provider_id_header}" == "true" ]]; then
-    _phase1_validate_provider_id_header_env
+    if [[ -n "${config_provider_id}" ]]; then
+      [[ "${config_provider_id}" =~ ^[0-9]+$ ]] \
+        || lib_die "ASSET_CONFIG: provider_id debe ser numérico (recibido: ${config_provider_id})"
+      # Config-embedded provider_id wins; ignore any stale INGESTA_API_PROVIDER_ID.
+      ASSET_PROVIDER_ID="${config_provider_id}"
+    else
+      _phase1_validate_provider_id_header_env
+      ASSET_PROVIDER_ID="${INGESTA_API_PROVIDER_ID}"
+    fi
     ASSET_REQUIRES_PROVIDER_ID_HEADER=1
   else
     ASSET_REQUIRES_PROVIDER_ID_HEADER=0
+    ASSET_PROVIDER_ID=""
   fi
 
   requires_api_key_header="$(jq -r '.requires_api_key_header // false' "${config_path}")"
@@ -589,6 +638,9 @@ _phase1_load_asset_config() {
   export ASSET_CONTENT_KIND="${content_kind}"
   export ASSET_EXTENSION="${extension}"
   export ASSET_MEDIA_TYPE="${media_type}"
+  export ASSET_HTTP_METHOD
+  export ASSET_PROXY_BODY
+  export ASSET_PROVIDER_ID
   export STORAGE_MODE="httpdata"
   export ASSET_KEYWORDS_JSON="$(_phase1_jq_array_json "${config_path}" keywords)"
   export ASSET_DATA_ADDRESS_NAME="${safe_slug}"
@@ -607,6 +659,8 @@ _phase1_write_asset_request() {
   lib_log INFO "ASSET_CONTENT_KIND=${ASSET_CONTENT_KIND}"
   lib_log INFO "ASSET_EXTENSION=${ASSET_EXTENSION}"
   lib_log INFO "ASSET_KEYWORDS_JSON=${ASSET_KEYWORDS_JSON}"
+  lib_log INFO "ASSET_HTTP_METHOD=${ASSET_HTTP_METHOD:-<default>}"
+  lib_log INFO "ASSET_PROXY_BODY=${ASSET_PROXY_BODY:-0}"
   lib_log INFO "ASSET_REQUIRES_PROVIDER_ID_HEADER=${ASSET_REQUIRES_PROVIDER_ID_HEADER:-0}"
   lib_log INFO "ASSET_REQUIRES_API_KEY_HEADER=${ASSET_REQUIRES_API_KEY_HEADER:-0}"
 
@@ -620,8 +674,10 @@ _phase1_write_asset_request() {
     --arg asset_slug "${ASSET_SLUG:-}" \
     --arg base_url "${ASSET_BASE_URL}" \
     --arg data_address_name "${ASSET_DATA_ADDRESS_NAME}" \
+    --arg http_method "${ASSET_HTTP_METHOD:-}" \
+    --arg proxy_body "${ASSET_PROXY_BODY:-}" \
     --arg provider_id_header_key "${PHASE1_PROVIDER_ID_HEADER_KEY}" \
-    --arg provider_id "${INGESTA_API_PROVIDER_ID:-}" \
+    --arg provider_id "${ASSET_PROVIDER_ID:-}" \
     --arg requires_provider_id_header "${ASSET_REQUIRES_PROVIDER_ID_HEADER:-0}" \
     --arg api_key_header_key "${PHASE1_API_KEY_HEADER_KEY}" \
     --arg api_key "${INGESTA_API_KEY:-}" \
@@ -651,6 +707,8 @@ _phase1_write_asset_request() {
         baseUrl: $base_url,
         name: $data_address_name
       }
+      + (if $http_method != "" then {method: $http_method} else {} end)
+      + (if $proxy_body == "1" then {proxyBody: "true"} else {} end)
       + (if $requires_provider_id_header == "1" then {($provider_id_header_key): $provider_id} else {} end)
       + (if $requires_api_key_header == "1" then {($api_key_header_key): $api_key} else {} end))
     }' > "${tmp}"
@@ -669,6 +727,11 @@ _phase1_append_context_field() {
 # ---------------------------------------------------------------------------
 # Bootstrap + init
 # ---------------------------------------------------------------------------
+
+# Allow unit tests to source helper functions without running the phase.
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+  return 0
+fi
 
 PHASE1_STEP="init"
 api_find_root
@@ -738,6 +801,8 @@ context_tmp="${context_file}.$$"
   _phase1_append_context_field ASSET_CONTENT_KIND "${ASSET_CONTENT_KIND:-}"
   _phase1_append_context_field ASSET_EXTENSION "${ASSET_EXTENSION:-}"
   _phase1_append_context_field ASSET_MEDIA_TYPE "${ASSET_MEDIA_TYPE:-}"
+  _phase1_append_context_field ASSET_HTTP_METHOD "${ASSET_HTTP_METHOD:-}"
+  _phase1_append_context_field ASSET_PROXY_BODY "${ASSET_PROXY_BODY:-}"
   _phase1_append_context_field ASSET_REQUIRES_PROVIDER_ID_HEADER "${ASSET_REQUIRES_PROVIDER_ID_HEADER:-}"
   _phase1_append_context_field ASSET_REQUIRES_API_KEY_HEADER "${ASSET_REQUIRES_API_KEY_HEADER:-}"
 } > "${context_tmp}"
@@ -842,6 +907,8 @@ create_asset_summary="$(
     --arg extension "${ASSET_EXTENSION}" \
     --arg media_type "${ASSET_MEDIA_TYPE}" \
     --arg asset_config "${ASSET_CONFIG:-}" \
+    --arg http_method "${ASSET_HTTP_METHOD:-}" \
+    --arg proxy_body "${ASSET_PROXY_BODY:-}" \
     --arg requires_provider_id_header "${ASSET_REQUIRES_PROVIDER_ID_HEADER:-0}" \
     --arg provider_id_header_key "${PHASE1_PROVIDER_ID_HEADER_KEY}" \
     --arg requires_api_key_header "${ASSET_REQUIRES_API_KEY_HEADER:-0}" \
@@ -855,6 +922,8 @@ create_asset_summary="$(
       media_type: $media_type
     }
     + (if $asset_config != "" then {asset_config: $asset_config} else {} end)
+    + (if $http_method != "" then {http_method: $http_method} else {} end)
+    + (if $proxy_body == "1" then {proxy_body: true} else {} end)
     + (if $requires_provider_id_header == "1" then {requires_provider_id_header: true, provider_id_header_key: $provider_id_header_key} else {} end)
     + (if $requires_api_key_header == "1" then {requires_api_key_header: true, api_key_header_key: $api_key_header_key} else {} end)
     + (if $asset_slug != "" then {} else {legacy: true} end)'

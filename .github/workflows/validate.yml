@@ -94,4 +94,5 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest \
             tools.tests.test_evidence_export \
             tools.tests.test_dataspace_resolution \
+            tools.tests.test_ingesta_api_post_support \
             -v

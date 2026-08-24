@@ -62,7 +62,7 @@ MINIMAL_PUBLICATION_PLACEHOLDER_IDENTIFIERS = {
     "transfer_process_id": "<transfer-process-id>",
 }
 MINIMAL_PUBLICATION_DEFAULT_FLOW_LABEL = "Ingestion API v2"
-MINIMAL_PUBLICATION_ALLOWED_STATUSES = {"ok", "failed", "skipped", "not_found", "passed", MINIMAL_PUBLICATION_NOT_RECORDED}
+MINIMAL_PUBLICATION_ALLOWED_STATUSES = {"ok", "failed", "skipped", "not_found", "passed", MINIMAL_PUBLICATION_NOT_RECORDED, MINIMAL_PUBLICATION_NOT_APPLICABLE}
 MINIMAL_PUBLICATION_OOXML_ALLOWED_PARTS = {
     "[Content_Types].xml",
     "_rels/.rels",
@@ -223,6 +223,14 @@ class MinimalPublicationModel:
     semantic_validation_source: str
     execution_identifiers: Dict[str, str]
     payload_included: bool
+    delivery_mode: str = "download"
+    http_operation: str = MINIMAL_PUBLICATION_NOT_RECORDED
+    http_method: str = MINIMAL_PUBLICATION_NOT_RECORDED
+    http_status: str = MINIMAL_PUBLICATION_NOT_RECORDED
+    manifest_kind: str = MINIMAL_PUBLICATION_NOT_RECORDED
+    request_body_persisted: bool = False
+    response_body_persisted: bool = False
+    download_persisted: bool = False
     not_recorded: str = MINIMAL_PUBLICATION_NOT_RECORDED
     not_applicable: str = MINIMAL_PUBLICATION_NOT_APPLICABLE
 
@@ -247,6 +255,14 @@ def build_minimal_publication_model(
     semantic_validation_recorded: bool = False,
     public_flow_label: str = MINIMAL_PUBLICATION_DEFAULT_FLOW_LABEL,
     flow_type: str = "ingestion-api-v2",
+    delivery_mode: str = "download",
+    http_operation: Any = MINIMAL_PUBLICATION_NOT_RECORDED,
+    http_method: Any = MINIMAL_PUBLICATION_NOT_RECORDED,
+    http_status: Any = MINIMAL_PUBLICATION_NOT_RECORDED,
+    manifest_kind: Any = MINIMAL_PUBLICATION_NOT_RECORDED,
+    request_body_persisted: bool = False,
+    response_body_persisted: bool = False,
+    download_persisted: bool = False,
 ) -> MinimalPublicationModel:
     """Build and validate the canonical minimal publication model."""
     phases = {
@@ -257,6 +273,9 @@ def build_minimal_publication_model(
         safe_byte_count = max(0, int(byte_count))
     except (TypeError, ValueError):
         safe_byte_count = 0
+    normalized_delivery = str(delivery_mode or "download")
+    if normalized_delivery not in {"download", "post_metadata_only"}:
+        normalized_delivery = "download"
     model = MinimalPublicationModel(
         test_id=str(test_id),
         public_flow_label=str(public_flow_label or MINIMAL_PUBLICATION_DEFAULT_FLOW_LABEL),
@@ -282,6 +301,14 @@ def build_minimal_publication_model(
         ),
         execution_identifiers=dict(MINIMAL_PUBLICATION_PLACEHOLDER_IDENTIFIERS),
         payload_included=False,
+        delivery_mode=normalized_delivery,
+        http_operation=str(http_operation if http_operation not in (None, "") else MINIMAL_PUBLICATION_NOT_RECORDED),
+        http_method=str(http_method if http_method not in (None, "") else MINIMAL_PUBLICATION_NOT_RECORDED),
+        http_status=str(http_status if http_status not in (None, "") else MINIMAL_PUBLICATION_NOT_RECORDED),
+        manifest_kind=str(manifest_kind if manifest_kind not in (None, "") else MINIMAL_PUBLICATION_NOT_RECORDED),
+        request_body_persisted=bool(request_body_persisted),
+        response_body_persisted=bool(response_body_persisted),
+        download_persisted=bool(download_persisted),
     )
     findings = validate_minimal_publication_model(model)
     if findings:
@@ -313,6 +340,19 @@ def validate_minimal_publication_model(model: MinimalPublicationModel) -> List[s
         findings.append("execution identifiers differ from placeholders")
     if model.payload_included:
         findings.append("payload must be excluded")
+    if model.delivery_mode not in {"download", "post_metadata_only"}:
+        findings.append("invalid delivery mode")
+    if model.delivery_mode == "post_metadata_only":
+        if model.download_status != MINIMAL_PUBLICATION_NOT_APPLICABLE:
+            findings.append("post metadata-only requires download_status=not_applicable")
+        if model.sha256_verified:
+            findings.append("post metadata-only must not claim sha256 verification")
+        if model.download_persisted or model.request_body_persisted or model.response_body_persisted:
+            findings.append("post metadata-only forbids persisted bodies/download")
+        if model.manifest_kind != "post_metadata_only":
+            findings.append("post metadata-only requires manifest_kind=post_metadata_only")
+        if model.http_operation != "POST" or model.http_method != "POST":
+            findings.append("post metadata-only requires POST operation/method")
     for value in (
         model.test_id,
         model.public_flow_label,
@@ -917,11 +957,68 @@ def extract_minimal_publication_model(
 ) -> MinimalPublicationModel:
     """Extract only allowlisted publication evidence inputs into the shared model."""
     parser = loader.parser or SummaryParser(loader.summary)
-    manifest = _load_json_object(
-        loader.run_dir / "phase4" / "download_manifest.json"
+    post_manifest = _load_json_object(
+        loader.run_dir / "phase4" / "post_manifest.json"
+    )
+    post_result = _load_json_object(
+        loader.run_dir / "phase4" / "post_result.json"
+    )
+    is_post_metadata_only = (
+        isinstance(post_manifest, dict)
+        and post_manifest.get("manifest_kind") == "post_metadata_only"
     )
     semantic = _load_json_object(
         loader.run_dir / "phase4" / "semantic_validation.json"
+    )
+    phase_statuses = {
+        phase: parser.phase_status(phase)
+        for phase in ("phase0", "phase1", "phase2", "phase3", "phase4")
+    }
+    flow_type = (
+        "ingestion-api-v2"
+        if spec.asset_key in {"", "ingestion_api_v2"}
+        else spec.asset_key
+    )
+    if is_post_metadata_only:
+        post_status = None
+        if isinstance(post_result, dict):
+            post_status = post_result.get("status")
+        if post_status is None and isinstance(post_manifest, dict):
+            post_status = post_manifest.get("status")
+        semantic_status = semantic.get("status") if isinstance(semantic, dict) else None
+        if not semantic_status:
+            semantic_status = "passed" if post_status == "ok" else "failed"
+        http_status = None
+        if isinstance(post_result, dict) and post_result.get("http_status") not in (None, ""):
+            http_status = post_result.get("http_status")
+        elif isinstance(post_manifest, dict):
+            http_status = post_manifest.get("http_status")
+        return build_minimal_publication_model(
+            test_id=spec.test_id,
+            asset_type=spec.asset_type,
+            evidence_role=spec.evidence_role,
+            technical_provider_connector=spec.technical_provider_connector,
+            technical_consumer_connector=spec.technical_consumer_connector,
+            phase_statuses=phase_statuses,
+            download_status=MINIMAL_PUBLICATION_NOT_APPLICABLE,
+            byte_count=0,
+            sha256_verified=False,
+            semantic_validation_status=semantic_status,
+            semantic_validation_recorded=True,
+            public_flow_label=spec.display_name or MINIMAL_PUBLICATION_DEFAULT_FLOW_LABEL,
+            flow_type=flow_type,
+            delivery_mode="post_metadata_only",
+            http_operation="POST",
+            http_method="POST",
+            http_status=http_status,
+            manifest_kind="post_metadata_only",
+            request_body_persisted=False,
+            response_body_persisted=False,
+            download_persisted=False,
+        )
+
+    manifest = _load_json_object(
+        loader.run_dir / "phase4" / "download_manifest.json"
     )
     source_hash = _find_first_value(manifest, {"sha256", "sha_256"})
     download_step = parser.get_step("phase4", "save_download") or {}
@@ -931,23 +1028,17 @@ def extract_minimal_publication_model(
         evidence_role=spec.evidence_role,
         technical_provider_connector=spec.technical_provider_connector,
         technical_consumer_connector=spec.technical_consumer_connector,
-        phase_statuses={
-            phase: parser.phase_status(phase)
-            for phase in ("phase0", "phase1", "phase2", "phase3", "phase4")
-        },
+        phase_statuses=phase_statuses,
         download_status=download_step.get("status") or parser.phase_status("phase4"),
         byte_count=_find_first_value(
             manifest, {"bytes", "size_bytes", "byte_count"}
         ),
         sha256_verified=isinstance(source_hash, str) and bool(source_hash.strip()),
-        semantic_validation_status=semantic.get("status"),
+        semantic_validation_status=semantic.get("status") if isinstance(semantic, dict) else None,
         semantic_validation_recorded=bool(semantic),
         public_flow_label=spec.display_name or MINIMAL_PUBLICATION_DEFAULT_FLOW_LABEL,
-        flow_type=(
-            "ingestion-api-v2"
-            if spec.asset_key in {"", "ingestion_api_v2"}
-            else spec.asset_key
-        ),
+        flow_type=flow_type,
+        delivery_mode="download",
     )
 
 

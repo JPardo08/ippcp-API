@@ -86,13 +86,27 @@ assets:
     asset_config: asset_configs/real/ingesta/ingesta_api_pull_pre_api_key.json
     validator: ingestion_api_v2
     match:
+      # PRE GET (existing) + PROD POST intake assets. Patterns are scoped to
+      # ippcp-ingesta-pull-*-prod / ippcp_ingesta_pull_*_prod and do not match WFS/SPARQL.
       asset_slugs:
         - ippcp_ingesta_api_pull_pre_api_key
+        - ippcp_ingesta_pull_industrias_ebro_prod
+        - ippcp_ingesta_pull_circe_prod
+      asset_slug_patterns:
+        - ippcp_ingesta_pull_*_prod
       asset_config_suffixes:
         - asset_configs/real/ingesta/ingesta_api_pull_pre_api_key.json
         - ingesta_api_pull_pre_api_key.json
+        - asset_configs/real/ingesta/ingesta_api_pull_industrias_ebro_prod.json
+        - ingesta_api_pull_industrias_ebro_prod.json
+        - asset_configs/real/ingesta/ingesta_api_pull_circe_prod.json
+        - ingesta_api_pull_circe_prod.json
       asset_id_prefixes:
         - ippcp_ingesta_api_pull_pre_api_key-
+        - ippcp-ingesta-pull-industrias-ebro-prod
+        - ippcp-ingesta-pull-circe-prod
+      asset_id_patterns:
+        - ippcp-ingesta-pull-*-prod
 
   csv_b2_legacy:
     family: ingestion

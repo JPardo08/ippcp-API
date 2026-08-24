@@ -795,6 +795,121 @@ The provider asset was published with a missing, invalid, or rotated API key/pro
 
 Correct the provider-side secret and publish a new asset. The provider data address is immutable for this assessment. Run phase 4 normally; do not add the upstream key to the consumer environment.
 
+### Issue: phase 4 POST fails before calling the Data Plane
+
+**Symptom**
+
+Phase 4 reports that `INGESTA_API_REQUEST_BODY_FILE` is required, missing, empty, or not valid JSON.
+
+**Likely cause**
+
+A PROD POST asset (`ASSET_HTTP_METHOD=POST`) was negotiated, but the consumer body file was not provisioned for phase 4.
+
+**Checks**
+
+```bash
+test -n "${INGESTA_API_REQUEST_BODY_FILE:-}"
+test -s "${INGESTA_API_REQUEST_BODY_FILE}"
+jq empty "${INGESTA_API_REQUEST_BODY_FILE}"
+```
+
+**Corrective action**
+
+Point `INGESTA_API_REQUEST_BODY_FILE` at a local JSON payload for the company asset. Do not commit production bodies. Do not paste the body into logs or evidence. See [Ingestion API flow](flows/ingestion-api.md).
+
+### Issue: confusing HTTP POST with HttpData-PUSH
+
+**Symptom**
+
+Operators expect transfer type `HttpData-PUSH` because phase 4 uses HTTP POST.
+
+**Likely cause**
+
+HTTP method (`POST`) vs EDC transfer vocabulary (`HttpData-PULL`).
+
+**Corrective action**
+
+Keep transfer `HttpData-PULL` and data address `HttpData` with `method=POST` and `proxyBody=true`. Do not switch the transfer type. PROD asset ids are `ippcp-ingesta-pull-*-prod`.
+
+### Issue: PROD POST uses wrong provider id after a previous PRE run
+
+**Symptom**
+
+Phase 1 publishes with an unexpected `X-Provider-Id`, or upstream rejects the provider.
+
+**Likely cause**
+
+A stale `INGESTA_API_PROVIDER_ID` remains exported in the shell while the PROD config embeds a different `provider_id` (Ebro `1`, CIRCE `2`).
+
+**Corrective action**
+
+Rely on config `provider_id` for PROD company assets. Unset stale `INGESTA_API_PROVIDER_ID` before phase 1, or ensure the config value is the one that must win.
+
+### Issue: phase 4 POST expects a download or response SHA-256
+
+**Symptom**
+
+Operators look for `downloads/assets/...`, `download_manifest.json`, or a response SHA-256 after a PROD POST run.
+
+**Likely cause**
+
+GET/download expectations applied to POST metadata-only phase 4.
+
+**Corrective action**
+
+For `ASSET_HTTP_METHOD=POST`, require `INGESTA_API_REQUEST_BODY_FILE`, confirm HTTP 2xx, and inspect `phase4/post_result.json` / `phase4/post_manifest.json` (`manifest_kind=post_metadata_only`). Do not require a downloaded payload or response SHA-256. Request and response bodies must not be persisted.
+
+### Issue: forcing `Authorization: Bearer` on the EDR hop returns 403
+
+**Symptom**
+
+Phase 4 fails with HTTP 403 when the consumer rewrites EDR authorization as `Bearer …`.
+
+**Likely cause**
+
+The Data Plane expects the raw EDR authorization material selected by the scripts, not an ad-hoc Bearer rewrite.
+
+**Corrective action**
+
+Use the scripted EDR authorization candidates. Do not force `Bearer` on top of a raw EDR authorization value.
+
+### Issue: EdD POST returns 500 and direct upstream POST also returns 500
+
+**Symptom**
+
+Phase 4 via the EdD Data Plane returns HTTP 500, and a provider-side direct POST to the same Intake URL with the same business body also returns HTTP 500.
+
+**Likely cause**
+
+Upstream/backend rejection or payload/schema problem — not a Data Plane proxy failure.
+
+**Checks**
+
+Compare (without publishing secrets or bodies):
+
+1. POST through EdD / phase 4 → 500;
+2. POST direct to the Intake URL with the same company headers/body → 500.
+
+**Corrective action**
+
+Treat matching 500s as an upstream/backend diagnosis. Fix the payload or backend contract with the data provider. Do not change transfer type to `HttpData-PUSH`.
+
+Historical note: a past Intake validation bug around an unexpected `field_id` shape produced this pattern and was corrected on the backend. Keep that as a diagnostic example, not as a general client rule.
+
+### Issue: CIRCE phase 4 is blocked without a company body
+
+**Symptom**
+
+CIRCE PROD completed phases 0–3, but phase 4 cannot run.
+
+**Likely cause**
+
+No CIRCE-specific functional request body was provided (the Industrias Ebro body is not interchangeable).
+
+**Corrective action**
+
+Leave CIRCE phase 4 as **N/A** until a CIRCE body file exists. Do not reuse the Ebro payload.
+
 ## WFS
 
 ### Issue: WFS response is not expected GeoJSON

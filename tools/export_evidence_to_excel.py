@@ -380,6 +380,18 @@ def minimal_publication_execution_outcome(model: MinimalPublicationModel) -> Tup
     ]
     if non_ok_phases:
         return "FAIL", f"Non-ok phases: {', '.join(non_ok_phases)}"
+    if model.delivery_mode == "post_metadata_only":
+        if model.download_status != model.not_applicable:
+            return "FAIL", f"POST metadata-only download status: {model.download_status}"
+        if model.http_operation != "POST" or model.http_method != "POST":
+            return "FAIL", "POST metadata-only requires POST operation"
+        try:
+            code = int(model.http_status)
+        except (TypeError, ValueError):
+            return "FAIL", f"POST http_status invalid: {model.http_status}"
+        if code < 200 or code >= 300:
+            return "FAIL", f"POST http_status: {code}"
+        return "PASS", "POST metadata-only"
     if model.download_status != "ok":
         return "FAIL", f"Download status: {model.download_status}"
     return "PASS", ""
@@ -425,6 +437,7 @@ def minimal_publication_summary_row(model: MinimalPublicationModel, spec=None) -
         "overall_status": overall_status,
         "notes": (
             f"{model.evidence_role}; "
+            f"delivery_mode={model.delivery_mode}; "
             f"semantic_validation={model.semantic_validation_status}"
             + (f"; {outcome_note}" if outcome_note else "")
         ),
@@ -486,6 +499,14 @@ def append_minimal_publication_sheet(
         "Manifest",
         ["field", "value"],
         [
+            ["delivery_mode", model.delivery_mode],
+            ["operation", model.http_operation],
+            ["http_method", model.http_method],
+            ["http_status", model.http_status],
+            ["manifest_kind", model.manifest_kind],
+            ["request_body_persisted", model.request_body_persisted],
+            ["response_body_persisted", model.response_body_persisted],
+            ["download_persisted", model.download_persisted],
             ["download_status", model.download_status],
             ["byte_count", model.byte_count],
             ["sha256_algorithm", model.sha256_algorithm],

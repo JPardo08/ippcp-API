@@ -102,6 +102,16 @@ MINIMAL_PUBLICATION_JSON_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "sha256_value": None,
             "payload_included": None,
         },
+        "delivery": {
+            "mode": None,
+            "operation": None,
+            "http_method": None,
+            "http_status": None,
+            "manifest_kind": None,
+            "request_body_persisted": None,
+            "response_body_persisted": None,
+            "download_persisted": None,
+        },
     },
     "validation_status.json": {
         "schema_version": None,
@@ -399,7 +409,11 @@ def build_minimal_publication_documents(
         },
         "sanitized_manifest.json": {
             "schema_version": "1.0",
-            "artifact_type": "sanitized-download-manifest",
+            "artifact_type": (
+                "sanitized-post-metadata-manifest"
+                if model.delivery_mode == "post_metadata_only"
+                else "sanitized-download-manifest"
+            ),
             "download": {
                 "status": model.download_status,
                 "byte_count": model.byte_count,
@@ -407,6 +421,16 @@ def build_minimal_publication_documents(
                 "sha256_verified": model.sha256_verified,
                 "sha256_value": model.sha256_value,
                 "payload_included": model.payload_included,
+            },
+            "delivery": {
+                "mode": model.delivery_mode,
+                "operation": model.http_operation,
+                "http_method": model.http_method,
+                "http_status": model.http_status,
+                "manifest_kind": model.manifest_kind,
+                "request_body_persisted": model.request_body_persisted,
+                "response_body_persisted": model.response_body_persisted,
+                "download_persisted": model.download_persisted,
             },
         },
         "validation_status.json": {

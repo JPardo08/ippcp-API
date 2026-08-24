@@ -1,0 +1,17 @@
+{
+  "asset_id": "ippcp-ingesta-pull-circe-prod",
+  "asset_slug": "ippcp_ingesta_pull_circe_prod",
+  "name": "IPPCP Ingesta API Pull PROD - CIRCE",
+  "description": "Ingesta IPPCP PROD mediante HTTP POST sobre un asset HttpData-PULL",
+  "type": "HttpData",
+  "base_url": "https://idezar-sig.zaragoza.es/servicios/ippcp-ingesta/api/intake",
+  "http_method": "POST",
+  "proxy_body": true,
+  "provider_id": "2",
+  "requires_provider_id_header": true,
+  "requires_api_key_header": true,
+  "content_kind": "json",
+  "extension": "json",
+  "media_type": "application/json",
+  "keywords": ["ippcp", "zaragoza", "ingesta", "api", "pull", "prod", "post", "circe"]
+}

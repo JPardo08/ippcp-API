@@ -61,8 +61,10 @@ The Data Plane:
 - validates EDR authorization from the consumer side;
 - resolves the provider asset data address;
 - applies provider-side upstream headers;
-- calls the upstream Ingestion API, WFS, or SPARQL resource;
+- calls the upstream Ingestion API, WFS, or SPARQL resource with the HTTP method configured on the data address (`GET` by default; `POST` when `method=POST` and `proxyBody=true`);
 - returns the data response to the authorized consumer.
+
+For Ingestion API PROD POST assets, the consumer backend supplies the request body and `Content-Type` on the EDR hop. That body is not an upstream secret, but it may contain business data and must not be persisted in shared evidence the same way API keys must not. Transfer type remains `HttpData-PULL`.
 
 The Data Plane separates consumer authorization from upstream authentication. The EDR credential and Ingestion API key must never be collapsed into one shared credential.
 

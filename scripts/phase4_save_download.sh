@@ -6,6 +6,10 @@
 # Prerrequisito: phase3 OK (phase3_env.sh o variables exportadas).
 # Sobrescribir descarga existente con hash distinto: DOWNLOAD_FORCE=1
 # Permitir body vacío: ALLOW_EMPTY_DOWNLOAD=1
+# Modo experimental Ingesta API protegida: PHASE4_REQUIRES_INGESTA_API_AUTH=1
+#
+# Assets POST (ASSET_HTTP_METHOD=POST):
+#   INGESTA_API_REQUEST_BODY_FILE=ruta/al/body.json  (obligatorio; no versionar payloads PROD)
 #
 # Uso:
 #   source runtime/env/latest/phase3_env.sh
@@ -28,6 +32,8 @@ PHASE4_EDR_AUTH_KEY=""
 PHASE4_EDR_AUTH_TYPE=""
 PHASE4_AUTH_CANDIDATE_LABEL=""
 PHASE4_DATA_RESPONSE_FILE=""
+PHASE4_REQUEST_BODY_FILE=""
+PHASE4_HTTP_METHOD="GET"
 COPY_ACTION=""
 
 declare -a PHASE4_AUTH_CANDIDATE_LABELS=()
@@ -162,6 +168,50 @@ _phase4_apply_asset_content_defaults() {
   export ASSET_CONTENT_KIND ASSET_EXTENSION ASSET_MEDIA_TYPE
 }
 
+_phase4_resolve_http_method() {
+  local method="${ASSET_HTTP_METHOD:-}"
+  if [[ -z "${method}" ]]; then
+    PHASE4_HTTP_METHOD="GET"
+    return 0
+  fi
+  case "${method}" in
+    GET|POST)
+      PHASE4_HTTP_METHOD="${method}"
+      ;;
+    *)
+      lib_die "ASSET_HTTP_METHOD no soportado en phase4: ${method} (esperado GET o POST)"
+      ;;
+  esac
+}
+
+_phase4_prepare_request_body() {
+  PHASE4_REQUEST_BODY_FILE=""
+  if [[ "${PHASE4_HTTP_METHOD}" != "POST" ]]; then
+    return 0
+  fi
+
+  [[ -n "${INGESTA_API_REQUEST_BODY_FILE:-}" ]] \
+    || lib_die "INGESTA_API_REQUEST_BODY_FILE requerido para assets POST antes de llamar al Data Plane"
+
+  local body_path="${INGESTA_API_REQUEST_BODY_FILE}"
+  if [[ "${body_path}" != /* ]]; then
+    body_path="${API_ROOT}/${body_path}"
+  fi
+
+  [[ -f "${body_path}" ]] \
+    || lib_die "INGESTA_API_REQUEST_BODY_FILE no encontrado: ${body_path}"
+  [[ -s "${body_path}" ]] \
+    || lib_die "INGESTA_API_REQUEST_BODY_FILE vacío: ${body_path}"
+
+  if [[ "${ASSET_CONTENT_KIND}" == "json" ]]; then
+    jq empty "${body_path}" \
+      || lib_die "INGESTA_API_REQUEST_BODY_FILE no es JSON válido"
+  fi
+
+  PHASE4_REQUEST_BODY_FILE="${body_path}"
+  lib_log INFO "phase4 POST request configured (body file present; content not logged)"
+}
+
 _phase4_data_response_basename() {
   printf '40_data_response.%s' "${ASSET_EXTENSION}"
 }
@@ -196,6 +246,15 @@ _phase4_assert_no_sensitive_control_artifact() {
         and (($root | getpath($p)) != "<redacted>"))
   ' "${file}" >/dev/null 2>&1; then
     lib_die "Artefacto phase4 contiene header:X-Api-Key sin <redacted>: ${file}"
+  fi
+
+  if [[ -n "${PHASE4_REQUEST_BODY_FILE:-}" && -f "${PHASE4_REQUEST_BODY_FILE}" ]]; then
+    local compact_body=""
+    compact_body="$(jq -c . "${PHASE4_REQUEST_BODY_FILE}" 2>/dev/null || true)"
+    if [[ -n "${compact_body}" && ${#compact_body} -ge 24 ]] \
+      && grep -Fq -- "${compact_body}" "${file}"; then
+      lib_die "Artefacto phase4 contiene el body POST de entrada: ${file}"
+    fi
   fi
 }
 
@@ -613,6 +672,32 @@ _phase4_obtain_edr() {
   _phase4_finalize_edr "${PHASE4_EDR_RAW_FILE}"
 }
 
+_phase4_load_ingesta_api_token_if_needed() {
+  if [[ "${PHASE4_REQUIRES_INGESTA_API_AUTH:-0}" != "1" ]]; then
+    return 0
+  fi
+
+  if [[ -n "${INGESTA_API_BEARER_TOKEN:-}" ]]; then
+    return 0
+  fi
+
+  local env_file="${INGESTA_API_AUTH_ENV:-${API_ROOT}/data/real/ingesta/auth/ingesta_api_auth.env}"
+  local token_helper="${API_ROOT}/data/real/ingesta/auth/get_ingesta_api_token.sh"
+
+  if [[ -f "${env_file}" ]]; then
+    # shellcheck source=/dev/null
+    source "${env_file}"
+  fi
+
+  [[ -x "${token_helper}" || -f "${token_helper}" ]] \
+    || lib_die "Helper de token no encontrado: ${token_helper}"
+
+  INGESTA_API_BEARER_TOKEN="$("${token_helper}")" \
+    || lib_die "No se pudo obtener token de Ingesta API en runtime"
+  [[ -n "${INGESTA_API_BEARER_TOKEN}" ]] \
+    || lib_die "Token de Ingesta API vacío"
+}
+
 _phase4_attempt_is_successful() {
   local attempt_file="$1"
   local http_code="$2"
@@ -622,6 +707,12 @@ _phase4_attempt_is_successful() {
   (( curl_exit == 0 )) || return 1
   [[ "${http_code}" =~ ^2[0-9]{2}$ ]] || return 1
   [[ -f "${attempt_file}" ]] || return 1
+
+  # POST intake: Geoslab has not fixed a response contract (200/201/202/204, empty or JSON).
+  # Treat any 2xx as success; do not inherit GET download emptiness/JSON requirements.
+  if [[ "${PHASE4_HTTP_METHOD}" == "POST" ]]; then
+    return 0
+  fi
 
   bytes="$(_phase4_file_bytes "${attempt_file}")"
   if (( bytes == 0 )) && [[ "${ALLOW_EMPTY_DOWNLOAD:-}" != "1" ]]; then
@@ -640,6 +731,7 @@ _phase4_write_data_preview() {
   local preview_file="$2"
   local tmp="${preview_file}.$$"
 
+  # GET-only preview. POST never embeds response bodies in evidence.
   if [[ "${ASSET_CONTENT_KIND}" == "json" ]]; then
     jq '
       if type == "array" then .[0:5]
@@ -664,6 +756,114 @@ _phase4_write_data_preview() {
   mv "${tmp}" "${preview_file}"
 }
 
+_phase4_ensure_post_tmp_dir() {
+  if [[ -z "${PHASE4_EDR_TMP_DIR}" || ! -d "${PHASE4_EDR_TMP_DIR}" ]]; then
+    PHASE4_EDR_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/phase4_edr.XXXXXX")"
+  fi
+}
+
+_phase4_scrub_file() {
+  local file="$1"
+  if [[ -n "${file}" && -e "${file}" ]]; then
+    rm -f "${file}"
+  fi
+}
+
+_phase4_write_post_metadata_manifest() {
+  local dest="$1"
+  local tmp="${dest}.$$"
+
+  jq -n \
+    --arg suffix "${SUFFIX}" \
+    --arg asset_id "${ASSET_ID}" \
+    --arg agreement_id "${AGREEMENT_ID}" \
+    --arg transfer_id "${TRANSFER_ID}" \
+    --arg edr_url "$(_phase4_safe_edr_url)" \
+    --arg operation "POST" \
+    --arg auth_candidate_label "${PHASE4_AUTH_CANDIDATE_LABEL}" \
+    --arg response_media_type "${PHASE4_POST_RESPONSE_MEDIA_TYPE:-}" \
+    --arg created_at "$(lib_now_iso)" \
+    --argjson http_status "${DATA_HTTP}" \
+    --argjson response_bytes "${PHASE4_POST_RESPONSE_BYTES:-0}" \
+    --argjson edr_url_redacted "$(_phase4_edr_url_has_sensitive_params "${EDR_URL:-}" && echo true || echo false)" \
+    --argjson request_body_bytes "${PHASE4_POST_REQUEST_BODY_BYTES:-0}" \
+    '{
+      suffix: $suffix,
+      asset_id: $asset_id,
+      agreement_id: $agreement_id,
+      transfer_id: $transfer_id,
+      edr_url: $edr_url,
+      edr_url_redacted: $edr_url_redacted,
+      operation: $operation,
+      http_method: "POST",
+      http_status: $http_status,
+      response_bytes: $response_bytes,
+      response_media_type: $response_media_type,
+      response_body_persisted: false,
+      request_body_persisted: false,
+      request_body_bytes: $request_body_bytes,
+      download_persisted: false,
+      auth_candidate_label: $auth_candidate_label,
+      created_at: $created_at,
+      status: "ok",
+      manifest_kind: "post_metadata_only"
+    }' > "${tmp}"
+
+  mv "${tmp}" "${dest}"
+}
+
+_phase4_finalize_post_metadata_only() {
+  local result_file="${PHASE4_DIR}/post_result.json"
+  local manifest_file="${PHASE4_DIR}/post_manifest.json"
+
+  [[ -n "${DATA_HTTP:-}" ]] || lib_die "POST phase4: DATA_HTTP vacío tras consumo"
+  [[ -n "${PHASE4_AUTH_CANDIDATE_LABEL:-}" ]] || lib_die "POST phase4: auth candidate vacío"
+
+  jq -n \
+    --arg operation "POST" \
+    --arg auth_candidate_label "${PHASE4_AUTH_CANDIDATE_LABEL}" \
+    --arg response_media_type "${PHASE4_POST_RESPONSE_MEDIA_TYPE:-}" \
+    --arg created_at "$(lib_now_iso)" \
+    --argjson http_status "${DATA_HTTP}" \
+    --argjson response_bytes "${PHASE4_POST_RESPONSE_BYTES:-0}" \
+    --argjson request_body_bytes "${PHASE4_POST_REQUEST_BODY_BYTES:-0}" \
+    '{
+      operation: $operation,
+      http_method: "POST",
+      http_status: $http_status,
+      response_bytes: $response_bytes,
+      response_media_type: $response_media_type,
+      response_body_persisted: false,
+      request_body_persisted: false,
+      request_body_bytes: $request_body_bytes,
+      download_persisted: false,
+      auth_candidate_label: $auth_candidate_label,
+      status: "ok",
+      created_at: $created_at
+    }' > "${result_file}"
+
+  _phase4_write_post_metadata_manifest "${manifest_file}"
+
+  # Scrub any residual response bodies under phase4 (attempts or canonical).
+  local residual
+  shopt -s nullglob
+  for residual in \
+    "${PHASE4_DIR}/40_data_response."* \
+    "${PHASE4_DIR}/40_data_response_attempt_"* \
+    "${PHASE4_DIR}/41_data_preview.json"
+  do
+    case "${residual}" in
+      *.http) continue ;;
+    esac
+    _phase4_scrub_file "${residual}"
+  done
+  shopt -u nullglob
+
+  _phase4_assert_no_sensitive_control_artifact "${PHASE4_DIR}/42_data_attempts_summary.json"
+  _phase4_assert_no_sensitive_control_artifact "${result_file}"
+  _phase4_assert_no_sensitive_control_artifact "${manifest_file}"
+}
+
 _phase4_consume_data_with_auth_candidates() {
   local i attempt_n label header http_code curl_exit base attempt_file selected=false success=0
   local summary_file="${PHASE4_DIR}/42_data_attempts_summary.json"
@@ -672,11 +872,28 @@ _phase4_consume_data_with_auth_candidates() {
   local attempts_json data_bytes data_http_val
   local canonical_file="${PHASE4_DIR}/$(_phase4_data_response_basename)"
   local -a curl_headers=()
+  local -a curl_extra=()
+  local request_body_bytes=0
+  local curl_meta response_media_type=""
+  local post_tmp_body=""
+  local attempt_response_bytes=0
+  local data_bytes=0
 
   PHASE4_DATA_RESPONSE_FILE="${canonical_file}"
   export PHASE4_DATA_RESPONSE_FILE
+  PHASE4_POST_RESPONSE_BYTES=0
+  PHASE4_POST_RESPONSE_MEDIA_TYPE=""
+  PHASE4_POST_REQUEST_BODY_BYTES=0
 
+  _phase4_resolve_http_method
+  _phase4_prepare_request_body
   _phase4_build_auth_candidates
+  _phase4_load_ingesta_api_token_if_needed
+
+  if [[ -n "${PHASE4_REQUEST_BODY_FILE}" ]]; then
+    request_body_bytes="$(_phase4_file_bytes "${PHASE4_REQUEST_BODY_FILE}")"
+    PHASE4_POST_REQUEST_BODY_BYTES="${request_body_bytes}"
+  fi
 
   for i in "${!PHASE4_AUTH_CANDIDATE_LABELS[@]}"; do
     attempt_n="$(printf '%02d' "$((i + 1))")"
@@ -686,63 +903,158 @@ _phase4_consume_data_with_auth_candidates() {
     attempt_file="${base}.${ASSET_EXTENSION}"
     selected=false
     curl_headers=(-H "${header}")
+    curl_extra=()
+    response_media_type=""
+    post_tmp_body=""
 
-    set +e
-    http_code="$(
-      curl -sS -o "${attempt_file}" -w '%{http_code}' \
-        -X GET "${EDR_URL}" \
-        "${curl_headers[@]}"
-    )"
-    curl_exit=$?
-    set -e
+    if [[ "${PHASE4_REQUIRES_INGESTA_API_AUTH:-0}" == "1" ]]; then
+      if _phase4_header_is_authorization "${header}"; then
+        lib_die "No se puede usar Authorization simultáneamente para autenticar contra el EDR/Data Plane y contra la Ingesta API upstream. Hace falta proxy/backend, trust Data Plane-backend, header alternativo o credencial gestionada en infraestructura."
+      fi
+      curl_headers+=(-H "Authorization: Bearer ${INGESTA_API_BEARER_TOKEN}")
+    fi
 
-    printf '%s\n' "${http_code}" > "${base}.http"
-    lib_log INFO "[phase4 data ${attempt_n}] label=${label} HTTP=${http_code} curl_exit=${curl_exit}"
+    if [[ "${PHASE4_HTTP_METHOD}" == "POST" ]]; then
+      _phase4_ensure_post_tmp_dir
+      post_tmp_body="${PHASE4_EDR_TMP_DIR}/post_attempt_${attempt_n}.body"
+      curl_headers+=(-H "Content-Type: ${ASSET_MEDIA_TYPE:-application/json}")
+      curl_extra=(--data-binary @"${PHASE4_REQUEST_BODY_FILE}")
+      set +e
+      curl_meta="$(
+        curl -sS -o "${post_tmp_body}" -w '%{http_code}\t%{content_type}' \
+          -X POST "${EDR_URL}" \
+          "${curl_headers[@]}" \
+          "${curl_extra[@]}"
+      )"
+      curl_exit=$?
+      set -e
+      http_code="$(printf '%s' "${curl_meta}" | awk -F '\t' '{print $1}')"
+      response_media_type="$(printf '%s' "${curl_meta}" | awk -F '\t' '{print $2}')"
+      printf '%s\n' "${http_code}" > "${base}.http"
+      lib_log INFO "[phase4 data ${attempt_n}] label=${label} method=POST HTTP=${http_code} curl_exit=${curl_exit}"
 
-    if _phase4_attempt_is_successful "${attempt_file}" "${http_code}" "${curl_exit}"; then
-      cp "${attempt_file}" "${canonical_file}"
-      cp "${base}.http" "${PHASE4_DIR}/40_data_response.http"
-      _phase4_write_data_preview "${canonical_file}" "${PHASE4_DIR}/41_data_preview.json"
+      data_bytes=0
+      if [[ -f "${post_tmp_body}" ]]; then
+        data_bytes="$(_phase4_file_bytes "${post_tmp_body}")"
+      fi
 
-      PHASE4_AUTH_CANDIDATE_LABEL="${label}"
-      selected=true
-      success=1
+      if _phase4_attempt_is_successful "${post_tmp_body}" "${http_code}" "${curl_exit}"; then
+        cp "${base}.http" "${PHASE4_DIR}/40_data_response.http"
+        PHASE4_AUTH_CANDIDATE_LABEL="${label}"
+        PHASE4_POST_RESPONSE_BYTES="${data_bytes}"
+        PHASE4_POST_RESPONSE_MEDIA_TYPE="${response_media_type}"
+        PHASE4_DATA_RESPONSE_FILE=""
+        export PHASE4_DATA_RESPONSE_FILE
+        selected=true
+        success=1
+      fi
+      _phase4_scrub_file "${post_tmp_body}"
+    else
+      set +e
+      http_code="$(
+        curl -sS -o "${attempt_file}" -w '%{http_code}' \
+          -X GET "${EDR_URL}" \
+          "${curl_headers[@]}"
+      )"
+      curl_exit=$?
+      set -e
+      printf '%s\n' "${http_code}" > "${base}.http"
+      lib_log INFO "[phase4 data ${attempt_n}] label=${label} HTTP=${http_code} curl_exit=${curl_exit}"
+
+      if _phase4_attempt_is_successful "${attempt_file}" "${http_code}" "${curl_exit}"; then
+        cp "${attempt_file}" "${canonical_file}"
+        cp "${base}.http" "${PHASE4_DIR}/40_data_response.http"
+        _phase4_write_data_preview "${canonical_file}" "${PHASE4_DIR}/41_data_preview.json"
+
+        PHASE4_AUTH_CANDIDATE_LABEL="${label}"
+        selected=true
+        success=1
+      fi
+    fi
+
+    attempt_response_bytes=0
+    if [[ "${PHASE4_HTTP_METHOD}" == "POST" ]]; then
+      attempt_response_bytes="${data_bytes:-0}"
+    elif [[ -f "${attempt_file}" ]]; then
+      attempt_response_bytes="$(_phase4_file_bytes "${attempt_file}")"
     fi
 
     summary_lines+=("$(
       jq -nc \
         --argjson attempt "$((i + 1))" \
         --arg attempt_label "${label}" \
+        --arg http_method "${PHASE4_HTTP_METHOD}" \
         --argjson http "$((http_code + 0))" \
         --argjson selected "$([[ "${selected}" == true ]] && echo true || echo false)" \
-        '{"attempt": $attempt, "label": $attempt_label, "http": $http, "selected": $selected}'
+        --argjson response_bytes "${attempt_response_bytes}" \
+        '{"attempt": $attempt, "label": $attempt_label, "http": $http, "selected": $selected}
+        + (if $http_method == "POST" then {
+            http_method: $http_method,
+            response_bytes: $response_bytes,
+            response_body_persisted: false
+          } else {} end)'
     )")
   done
 
   attempts_json="$(jq -s '.' <<< "$(printf '%s\n' "${summary_lines[@]}")")"
 
   if (( success == 1 )); then
-    data_bytes="$(_phase4_file_bytes "${canonical_file}")"
     data_http_val="$(tr -d '\n\r' < "${PHASE4_DIR}/40_data_response.http")"
-    jq -nc \
-      --arg content_kind "${ASSET_CONTENT_KIND}" \
-      --arg extension "${ASSET_EXTENSION}" \
-      --arg media_type "${ASSET_MEDIA_TYPE}" \
-      --arg data_response_file "phase4/$(_phase4_data_response_basename)" \
-      --argjson data_http "${data_http_val}" \
-      --argjson bytes "${data_bytes}" \
-      --argjson attempts "${attempts_json}" \
-      '{
-        content_kind: $content_kind,
-        extension: $extension,
-        media_type: $media_type,
-        data_response_file: $data_response_file,
-        data_http: $data_http,
-        bytes: $bytes,
-        attempts: $attempts
-      }' > "${summary_tmp}"
+    if [[ "${PHASE4_HTTP_METHOD}" == "POST" ]]; then
+      jq -nc \
+        --arg http_method "POST" \
+        --arg media_type "${ASSET_MEDIA_TYPE}" \
+        --arg response_media_type "${PHASE4_POST_RESPONSE_MEDIA_TYPE:-}" \
+        --argjson data_http "${data_http_val}" \
+        --argjson response_bytes "${PHASE4_POST_RESPONSE_BYTES:-0}" \
+        --argjson request_body_bytes "${request_body_bytes}" \
+        --argjson attempts "${attempts_json}" \
+        '{
+          http_method: $http_method,
+          media_type: $media_type,
+          response_media_type: $response_media_type,
+          data_http: $data_http,
+          response_bytes: $response_bytes,
+          response_body_persisted: false,
+          request_body_persisted: false,
+          request_body_bytes: $request_body_bytes,
+          download_persisted: false,
+          attempts: $attempts
+        }' > "${summary_tmp}"
+    else
+      data_bytes="$(_phase4_file_bytes "${canonical_file}")"
+      jq -nc \
+        --arg content_kind "${ASSET_CONTENT_KIND}" \
+        --arg extension "${ASSET_EXTENSION}" \
+        --arg media_type "${ASSET_MEDIA_TYPE}" \
+        --arg data_response_file "phase4/$(_phase4_data_response_basename)" \
+        --argjson data_http "${data_http_val}" \
+        --argjson bytes "${data_bytes}" \
+        --argjson attempts "${attempts_json}" \
+        '{
+          content_kind: $content_kind,
+          extension: $extension,
+          media_type: $media_type,
+          data_response_file: $data_response_file,
+          data_http: $data_http,
+          bytes: $bytes,
+          attempts: $attempts
+        }' > "${summary_tmp}"
+    fi
   else
-    jq -nc --argjson attempts "${attempts_json}" '{attempts: $attempts}' > "${summary_tmp}"
+    jq -nc \
+      --arg http_method "${PHASE4_HTTP_METHOD}" \
+      --argjson request_body_bytes "${request_body_bytes}" \
+      --argjson attempts "${attempts_json}" \
+      '{attempts: $attempts}
+      + (if $http_method == "POST" then {
+          http_method: $http_method,
+          request_body_bytes: $request_body_bytes,
+          response_body_persisted: false,
+          request_body_persisted: false,
+          download_persisted: false
+        } else {} end)' \
+      > "${summary_tmp}"
   fi
 
   mv "${summary_tmp}" "${summary_file}"
@@ -751,7 +1063,7 @@ _phase4_consume_data_with_auth_candidates() {
     return 0
   fi
 
-  lib_die "No se pudo consumir el endpoint EDR desde phase4. Revisar phase4/40_data_response_attempt_*.${ASSET_EXTENSION} y phase4/42_data_attempts_summary.json"
+  lib_die "No se pudo consumir el endpoint EDR desde phase4. Revisar phase4/40_data_response_attempt_*.http y phase4/42_data_attempts_summary.json"
 }
 
 _phase4_validate_prerequisites() {
@@ -790,7 +1102,9 @@ _phase4_write_manifest() {
     --argjson data_http "${DATA_HTTP}" \
     --arg copy_action "${COPY_ACTION}" \
     --arg auth_candidate_label "${PHASE4_AUTH_CANDIDATE_LABEL}" \
+    --argjson phase4_ingesta_auth "$([[ "${PHASE4_REQUIRES_INGESTA_API_AUTH:-0}" == "1" ]] && echo true || echo false)" \
     --argjson edr_url_redacted "$(_phase4_edr_url_has_sensitive_params "${EDR_URL:-}" && echo true || echo false)" \
+    --arg http_method "${PHASE4_HTTP_METHOD}" \
     '{
       suffix: $suffix,
       asset_id: $asset_id,
@@ -812,8 +1126,10 @@ _phase4_write_manifest() {
       phase3_status: $phase3_status,
       data_http: $data_http,
       copy_action: $copy_action,
-      auth_candidate_label: $auth_candidate_label
-    }' > "${tmp}"
+      auth_candidate_label: $auth_candidate_label,
+      phase4_ingesta_auth: $phase4_ingesta_auth
+    }
+    + (if $http_method == "POST" then {http_method: $http_method} else {} end)' > "${tmp}"
 
   mv "${tmp}" "${dest}"
 }
@@ -821,6 +1137,11 @@ _phase4_write_manifest() {
 # ---------------------------------------------------------------------------
 # Bootstrap
 # ---------------------------------------------------------------------------
+
+# Allow unit tests to source helper functions without running the phase.
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+  return 0
+fi
 
 PHASE4_STEP="init"
 api_find_root
@@ -886,6 +1207,55 @@ PHASE4_STEP="data_consumed"
 _phase4_consume_data_with_auth_candidates
 
 DATA_HTTP="$(tr -d '\n\r' < "${PHASE4_DIR}/40_data_response.http")"
+
+if [[ "${PHASE4_HTTP_METHOD}" == "POST" ]]; then
+  PHASE4_STEP="post_result"
+  _phase4_finalize_post_metadata_only
+
+  _phase4_assert_no_sensitive_control_artifact "${PHASE4_DIR}/30_edr_dataaddress_redacted.json"
+  _phase4_assert_no_sensitive_control_artifact "${PHASE4_DIR}/30_edr_dataaddress_keys.json"
+  _phase4_assert_no_sensitive_control_artifact "${PHASE4_DIR}/31_edrs_request_body.json"
+  _phase4_assert_no_sensitive_control_artifact "${PHASE4_DIR}/31_edrs_request_redacted.json"
+  _phase4_assert_no_sensitive_control_artifact "${PHASE4_DIR}/42_data_attempts_summary.json"
+  _phase4_assert_no_sensitive_control_artifact "${PHASE4_DIR}/post_result.json"
+  _phase4_assert_no_sensitive_control_artifact "${PHASE4_DIR}/post_manifest.json"
+
+  PHASE4_STEP="export_summary"
+  lib_write_summary 4 post_result ok \
+    "$(jq -nc \
+      --arg operation "POST" \
+      --arg auth_candidate_label "${PHASE4_AUTH_CANDIDATE_LABEL}" \
+      --arg response_media_type "${PHASE4_POST_RESPONSE_MEDIA_TYPE:-}" \
+      --arg manifest "phase4/post_manifest.json" \
+      --arg result_artifact "phase4/post_result.json" \
+      --argjson http_status "${DATA_HTTP}" \
+      --argjson response_bytes "${PHASE4_POST_RESPONSE_BYTES:-0}" \
+      --argjson request_body_bytes "${PHASE4_POST_REQUEST_BODY_BYTES:-0}" \
+      '{
+        operation: $operation,
+        http_method: "POST",
+        http_status: $http_status,
+        response_bytes: $response_bytes,
+        response_media_type: $response_media_type,
+        response_body_persisted: false,
+        request_body_persisted: false,
+        request_body_bytes: $request_body_bytes,
+        download_persisted: false,
+        auth_candidate_label: $auth_candidate_label,
+        manifest: $manifest,
+        result_artifact: $result_artifact,
+        status: "ok"
+      }')"
+
+  _phase4_assert_no_sensitive_control_artifact "${RUN_DIR}/summary.json"
+  lib_set_phase_status 4 ok
+
+  trap - ERR
+  _phase4_cleanup
+  lib_log INFO "Fase 4 OK — POST metadata-only http=${DATA_HTTP} response_bytes=${PHASE4_POST_RESPONSE_BYTES:-0} response_body_persisted=false"
+  exit 0
+fi
+
 SOURCE_DATA_FILE="${PHASE4_DATA_RESPONSE_FILE}"
 
 SAFE_ASSET_ID="$(_phase4_sanitize_asset_id "${ASSET_ID}")"
@@ -964,6 +1334,7 @@ lib_write_summary 4 save_download ok \
     --arg auth_candidate_label "${PHASE4_AUTH_CANDIDATE_LABEL}" \
     --argjson bytes "${FILE_BYTES}" \
     --argjson data_http "${DATA_HTTP}" \
+    --argjson phase4_ingesta_auth "$([[ "${PHASE4_REQUIRES_INGESTA_API_AUTH:-0}" == "1" ]] && echo true || echo false)" \
     '{
       download_file: $download_file,
       latest_file: $latest_file,
@@ -977,7 +1348,8 @@ lib_write_summary 4 save_download ok \
       copy_action: $copy_action,
       bytes: $bytes,
       data_http: $data_http,
-      auth_candidate_label: $auth_candidate_label
+      auth_candidate_label: $auth_candidate_label,
+      phase4_ingesta_auth: $phase4_ingesta_auth
     }')"
 
 _phase4_assert_no_sensitive_control_artifact "${RUN_DIR}/summary.json"

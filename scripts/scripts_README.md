@@ -286,7 +286,10 @@ Recomendación: probar primero con un CSV o TXT pequeño antes de Excel/ZIP.
 | `media_type` | no | Default según extensión (ver tabla abajo) |
 | `keywords` | no | Array de strings; default `[]` |
 | `asset_id` | no | Si omitido: `${asset_slug}-${SUFFIX}`; si explícito: `^[A-Za-z0-9._-]+$` |
-| `requires_provider_id_header` | no | Booleano. Si `true`, Fase 1 requiere `INGESTA_API_PROVIDER_ID` numérico y añade `X-Provider-Id` al `dataAddress` |
+| `http_method` | no | Si omitido: sin propiedad `method` en el `dataAddress` (GET implícito). Permitidos: `GET`, `POST` |
+| `proxy_body` | no | Booleano. Si `true`, emite `proxyBody:"true"` (string) en el `dataAddress` |
+| `provider_id` | no | Numérico no secreto. Si está presente con `requires_provider_id_header=true`, se usa como `X-Provider-Id` y no hace falta `INGESTA_API_PROVIDER_ID` |
+| `requires_provider_id_header` | no | Booleano. Si `true`, Fase 1 añade `X-Provider-Id` (desde `provider_id` o `INGESTA_API_PROVIDER_ID`) |
 | `requires_api_key_header` | no | Booleano. Si `true`, Fase 1 requiere `INGESTA_API_KEY` y añade `X-Api-Key` al `dataAddress`; la evidencia persiste solo `<redacted>` |
 
 Pares `content_kind` / `extension` válidos:
@@ -520,7 +523,58 @@ Prueba directa PRE autorizada:
 data/real/ingesta/pre/curl_ingesta_api_pull_pre_base.sh
 ```
 
-Las variantes de consulta no confirmadas y las configuraciones PRO preparatorias están excluidas de la guía pública actual.
+Las variantes de consulta no confirmadas y las configuraciones GET PRO preparatorias están excluidas de la guía pública actual.
+
+### Ingesta API Pull PROD (HTTP POST sobre HttpData-PULL)
+
+Transfer = `HttpData-PULL`; `dataAddress.type=HttpData`; HTTP method = `POST`; `proxyBody=true`. `POST` no es `HttpData-PUSH`.
+
+Upstream PROD:
+
+```text
+https://idezar-sig.zaragoza.es/servicios/ippcp-ingesta/api/intake
+```
+
+| Empresa | `ASSET_CONFIG` | `provider_id` |
+| --- | --- | --- |
+| Industrias Ebro | `asset_configs/real/ingesta/ingesta_api_pull_industrias_ebro_prod.json` | `1` |
+| CIRCE | `asset_configs/real/ingesta/ingesta_api_pull_circe_prod.json` | `2` |
+
+Plantilla de entorno (ignorada; no versionar secretos):
+
+```text
+data/real/ingesta/auth/ingesta_api_key_prod.env.example
+→ data/real/ingesta/auth/ingesta_api_key_prod.env
+```
+
+```bash
+source data/real/ingesta/auth/ingesta_api_key_prod.env
+ASSET_CONFIG=asset_configs/real/ingesta/ingesta_api_pull_industrias_ebro_prod.json \
+$BASH_BIN scripts/phase1_provider_publish.sh
+# o: asset_configs/real/ingesta/ingesta_api_pull_circe_prod.json
+unset INGESTA_API_KEY INGESTA_API_PROVIDER_ID
+```
+
+`provider_id` viene del config por empresa (no secreto) y debe prevalecer frente a un `INGESTA_API_PROVIDER_ID` stale en el shell. `X-Api-Key` es secreto runtime/provider-side.
+
+GET histórico (PRE y otros HttpData GET) conserva descarga en phase4 (`downloads/assets/…` + manifest + sha256).
+
+Phase4 POST (solo con body de la empresa correcta; Industrias Ebro validado end-to-end; CIRCE phase4 = N/A sin payload CIRCE):
+
+```bash
+export INGESTA_API_REQUEST_BODY_FILE=/path/file.json
+$BASH_BIN scripts/phase4_save_download.sh
+unset INGESTA_API_REQUEST_BODY_FILE
+```
+
+El body de request **no** se persiste. El body de response **no** se persiste. No hay descarga ni sha256 de response. Salida metadata-only:
+
+```text
+evidencias/runs/${SUFFIX}/phase4/post_result.json
+evidencias/runs/${SUFFIX}/phase4/post_manifest.json
+```
+
+No uses el payload de Industrias Ebro para CIRCE.
 
 ### CSV ingesta real (B2)
 
